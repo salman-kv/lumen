@@ -1,0 +1,35 @@
+# One command: docker compose up --build
+# Free stack: the LLM runs locally in the `ollama` container (no account, no API key).
+services:
+  app:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string-before-deploying}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+    volumes: ["appdata:/data"]
+    depends_on: [ollama]
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes: ["ollama:/root/.ollama"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      retries: 10
+
+  # One-shot job that downloads the model into the ollama volume.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama: { condition: service_healthy }
+    environment: { OLLAMA_HOST: "http://ollama:11434" }
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:3b}"]
+    restart: "no"
+
+volumes:
+  appdata:
+  ollama:

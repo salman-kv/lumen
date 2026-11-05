@@ -1,0 +1,16 @@
+# secrets and local state
+.env
+*.env.local
+backend/data/
+sample_data/.tokens.json
+sample_data/eval_results.json
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+node_modules/
+frontend/dist/

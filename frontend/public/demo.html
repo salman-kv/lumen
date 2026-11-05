@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Embed demo: a customer's website</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1c2430; background: #f3f5f8; line-height: 1.6; }
+    header { background: #12263f; color: #fff; padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; font-family: system-ui, sans-serif; }
+    header strong { font-size: 18px; letter-spacing: .02em; }
+    header nav { display: flex; gap: 22px; font-size: 14px; opacity: .85; }
+    .hero { max-width: 960px; margin: 0 auto; padding: 56px 24px 24px; }
+    .hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.12; margin: 0 0 14px; }
+    .hero p { max-width: 62ch; font-size: 18px; color: #3d4a5c; }
+    .grid { max-width: 960px; margin: 0 auto; padding: 0 24px 80px; display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); font-family: system-ui, sans-serif; }
+    .tile { background: #fff; border: 1px solid #dfe4ea; border-radius: 14px; padding: 22px; }
+    .tile h2 { margin: 0 0 6px; font-size: 17px; }
+    .tile p { margin: 0; color: #556070; font-size: 14.5px; }
+    .note { max-width: 960px; margin: 0 auto 48px; padding: 0 24px; font-family: system-ui, sans-serif; }
+    .note div { border: 1px dashed #9aa7b8; border-radius: 14px; padding: 16px 18px; background: #fff; font-size: 14px; color: #3d4a5c; }
+    .note code { background: #eef1f5; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+    .inline { max-width: 960px; margin: 0 auto 80px; padding: 0 24px; }
+    .inline iframe { width: 100%; max-width: 440px; height: 640px; border: 0; border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, .18); }
+  </style>
+</head>
+<body>
+  <header><strong>Your Organization</strong><nav><span>About</span><span>Programmes</span><span>Contact</span></nav></header>
+  <section class="hero">
+    <h1>This is a customer's website with the assistant embedded.</h1>
+    <p>The assistant is added with one script tag. It answers from the organization's own PDFs, cites the page, and has no access to anything else on this page.</p>
+  </section>
+  <div class="note"><div id="status">Loading demo...</div></div>
+  <div class="grid">
+    <div class="tile"><h2>Apply online</h2><p>Applications open every spring. Ask the assistant about deadlines and documents.</p></div>
+    <div class="tile"><h2>Support and benefits</h2><p>Check whether you qualify for programmes without reading the full policy.</p></div>
+    <div class="tile"><h2>Contact us</h2><p>Questions the documents can't answer are flagged for a human to follow up.</p></div>
+  </div>
+  <div class="inline" id="inline-slot"></div>
+
+  <script>
+    (function () {
+      var p = new URLSearchParams(location.search);
+      var token = p.get('token');
+      var status = document.getElementById('status');
+      if (!token) {
+        status.innerHTML = 'Add your assistant token to the address: <code>/demo.html?token=ast_...</code>. You can open this page from the dashboard (Assistant, then Open demo page).';
+        return;
+      }
+      if (p.get('mode') === 'inline') {
+        var f = document.createElement('iframe');
+        f.src = '/a/' + encodeURIComponent(token) + '?embed=1';
+        f.title = 'Assistant';
+        document.getElementById('inline-slot').appendChild(f);
+        status.innerHTML = 'Showing the <b>inline panel</b> (iframe). Remove <code>&amp;mode=inline</code> to see the chat bubble.';
+        return;
+      }
+      var s = document.createElement('script');
+      s.src = '/embed.js';
+      s.async = true;
+      s.setAttribute('data-token', token);
+      document.body.appendChild(s);
+      status.innerHTML = 'The <b>chat bubble</b> in the bottom-right corner was added by one script tag. Add <code>&amp;mode=inline</code> to the address to see the inline panel.';
+    })();
+  </script>
+</body>
+</html>

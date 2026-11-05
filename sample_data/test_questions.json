@@ -1,0 +1,221 @@
+{
+  "organizations": {
+    "northfield": {
+      "name": "Northfield University",
+      "email": "demo-northfield@example.com",
+      "password": "demo-password-1",
+      "assistant_name": "Northfield Helper",
+      "brand_color": "#6366f1",
+      "welcome": "Hi! I can answer questions about scholarships, admissions and fees.",
+      "suggestions": [
+        "Am I eligible for the Merit Scholarship?",
+        "How do I apply for a scholarship?",
+        "What is the refund policy?"
+      ]
+    },
+    "acme": {
+      "name": "Acme Corp",
+      "email": "demo-acme@example.com",
+      "password": "demo-password-2",
+      "assistant_name": "Acme HR Buddy",
+      "brand_color": "#0ea5e9",
+      "welcome": "Hello! Ask me about leave, remote work and expenses.",
+      "suggestions": [
+        "Can I work remotely?",
+        "How much annual leave do I get?",
+        "Who approves a $900 expense?"
+      ]
+    }
+  },
+  "questions": [
+    {
+      "id": 1,
+      "org": "northfield",
+      "type": "direct information",
+      "q": "What is the application deadline for undergraduate admissions?",
+      "expect": {
+        "status": "answered",
+        "doc": "Admissions_FAQ.pdf"
+      }
+    },
+    {
+      "id": 2,
+      "org": "northfield",
+      "type": "direct information",
+      "q": "How much is the annual tuition for international students?",
+      "expect": {
+        "status": "answered",
+        "doc": "Fee_Policy.pdf"
+      }
+    },
+    {
+      "id": 3,
+      "org": "northfield",
+      "type": "policy",
+      "q": "What is the refund policy if I withdraw from a semester?",
+      "expect": {
+        "status": "answered",
+        "doc": "Fee_Policy.pdf"
+      }
+    },
+    {
+      "id": 4,
+      "org": "northfield",
+      "type": "procedural",
+      "q": "How do I apply for a scholarship and appeal a decision?",
+      "expect": {
+        "status": "answered",
+        "doc": "Scholarship_Rules.pdf"
+      }
+    },
+    {
+      "id": 5,
+      "org": "northfield",
+      "type": "comparison",
+      "q": "What is the difference between the Merit Scholarship and the Sports Scholarship?",
+      "expect": {
+        "status": "answered",
+        "doc": "Scholarship_Rules.pdf"
+      }
+    },
+    {
+      "id": 6,
+      "org": "northfield",
+      "type": "multi-condition decision (3 decisions)",
+      "q": "I'm a second-year student with a 3.6 GPA and I already have a sports scholarship. Am I eligible for the merit scholarship?",
+      "expect": {
+        "status": "answered",
+        "verdict": "not_eligible",
+        "doc": "Scholarship_Rules.pdf"
+      }
+    },
+    {
+      "id": 7,
+      "org": "northfield",
+      "type": "multi-condition decision (3 decisions)",
+      "q": "I am a third year student with a GPA of 3.8 and no sports scholarship. Can I get the merit scholarship?",
+      "expect": {
+        "status": "answered",
+        "verdict": "eligible",
+        "doc": "Scholarship_Rules.pdf"
+      }
+    },
+    {
+      "id": 8,
+      "org": "northfield",
+      "type": "multi-condition decision",
+      "q": "I'm a first-year student with a 3.2 GPA and no sports scholarship. Do I qualify for the merit scholarship?",
+      "expect": {
+        "status": "answered",
+        "verdict": "not_eligible"
+      }
+    },
+    {
+      "id": 9,
+      "org": "northfield",
+      "type": "needs more information",
+      "q": "Am I eligible for the merit scholarship if I have a 3.9 GPA?",
+      "expect": {
+        "status": "needs_info",
+        "verdict": "need_info"
+      }
+    },
+    {
+      "id": 10,
+      "org": "northfield",
+      "type": "not in knowledge base",
+      "q": "Does the university offer a PhD in astrophysics?",
+      "expect": {
+        "status": "no_knowledge"
+      }
+    },
+    {
+      "id": 11,
+      "org": "northfield",
+      "type": "not in knowledge base",
+      "q": "What time does the cafeteria close on Fridays?",
+      "expect": {
+        "status": "no_knowledge"
+      }
+    },
+    {
+      "id": 12,
+      "org": "northfield",
+      "type": "cross-tenant probe",
+      "q": "How many days of annual leave do employees get?",
+      "expect": {
+        "status": "no_knowledge"
+      }
+    },
+    {
+      "id": 13,
+      "org": "acme",
+      "type": "direct information",
+      "q": "How many days of annual leave do employees get?",
+      "expect": {
+        "status": "answered",
+        "doc": "Leave_Policy.pdf"
+      }
+    },
+    {
+      "id": 14,
+      "org": "acme",
+      "type": "policy",
+      "q": "What is the approval policy for expenses above $500?",
+      "expect": {
+        "status": "answered",
+        "doc": "Expense_Policy.pdf"
+      }
+    },
+    {
+      "id": 15,
+      "org": "acme",
+      "type": "multi-condition decision (3 decisions)",
+      "q": "I've worked here for 8 months and I have an approved remote work agreement. Can I qualify for remote work 2 days per week?",
+      "expect": {
+        "status": "answered",
+        "verdict": "eligible",
+        "doc": "Remote_Work_Policy.pdf"
+      }
+    },
+    {
+      "id": 16,
+      "org": "acme",
+      "type": "multi-condition decision",
+      "q": "I joined 5 months ago. Am I eligible for parental leave?",
+      "expect": {
+        "status": "answered",
+        "verdict": "not_eligible",
+        "doc": "Leave_Policy.pdf"
+      }
+    },
+    {
+      "id": 17,
+      "org": "acme",
+      "type": "cross-tenant probe",
+      "q": "What is the GPA requirement for the Merit Scholarship?",
+      "expect": {
+        "status": "no_knowledge"
+      }
+    },
+    {
+      "id": 18,
+      "org": "acme",
+      "type": "not in knowledge base",
+      "q": "What is the company's stock option vesting schedule?",
+      "expect": {
+        "status": "no_knowledge"
+      }
+    },
+    {
+      "id": 19,
+      "org": "acme",
+      "type": "needs more information (no facts stated)",
+      "q": "Can I work remotely?",
+      "expect": {
+        "status": "needs_info",
+        "verdict": "need_info"
+      }
+    }
+  ]
+}
