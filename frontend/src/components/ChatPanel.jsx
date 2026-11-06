@@ -140,7 +140,12 @@ export default function ChatPanel({ token, embedded = false, className = "", pre
     if (!question || busy) return
     // Answering a "more information needed" reply: send the earlier question along so the new facts combine with it.
     const prevBot = msgs[msgs.length - 1]
-    const context = prevBot?.final?.status === 'needs_info' ? msgs[msgs.length - 2]?.text || '' : ''
+    // Short follow-ups ("what about the sports one?", "and for third year?", "tell me more") also carry the earlier question.
+    const FOLLOW_UP = /^(and|also|what about|how about|what if|then|so|but|why|how so|what else|more|tell me more|explain|and if|for)\b|\b(it|that|this|they|those|them|its|the same|there)\b/i
+    const prevQuestion = msgs[msgs.length - 2]?.text || ''
+    const prevWasReal = prevBot?.final && !['small_talk', 'blocked', 'unclear', 'language', 'human', 'abuse', 'bare_reply'].includes(prevBot.final.question_type?.label) && prevBot.final.status !== 'no_knowledge'
+    const followUp = prevWasReal && question.split(/\s+/).length <= 9 && FOLLOW_UP.test(question)
+    const context = prevBot?.final?.status === 'needs_info' || followUp ? prevQuestion : ''
     lastQ.current = question
     setInput(''); setBusy(true)
     setMsgs((ms) => [...ms, { role: 'user', text: question }, { role: 'bot', text: '', steps: [], pending: true }])

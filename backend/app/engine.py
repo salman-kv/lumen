@@ -342,14 +342,12 @@ def build_references(hits: list[Hit], results: list[dict], best: float) -> list[
     return refs
 
 
-def _smalltalk(org_id: int, question: str) -> str | None:
-    if len(question.split()) > 6:
-        return None
+def _route(org_id: int, question: str):
     db = SessionLocal()
     try:
         org = db.get(Organization, org_id)
         docs = [d.filename for d in db.query(Document).filter(Document.org_id == org_id, Document.status == "ready")]
-        return smalltalk.reply(question, org.assistant_name, org.name, list(org.suggestions or []), docs)
+        return smalltalk.route(question, org.assistant_name, org.name, list(org.suggestions or []), docs)
     finally:
         db.close()
 
@@ -372,17 +370,18 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
         return _ev(id=step_id, label=label, kind=kind, status="running", ms=0, detail="")
 
     # 0. Small talk ("hi", "thanks", "what can you do") is answered by the app: instant, no search, no LLM
-    chat = await asyncio.to_thread(_smalltalk, org_id, question)
-    if chat:
+    routed = await asyncio.to_thread(_route, org_id, question)
+    if routed:
+        intent, chat, as_answered = routed
         t = time.perf_counter()
-        yield done("classify", "Classify question", "s1", t, "small talk (rule)")
+        yield done("classify", "Classify question", "s1", t, f"{intent.replace('_', ' ')} (rule)")
         for sid, label, kind in (("retrieve", "Search documents", "s1"), ("choose", "Choose policy", "s1"),
                                  ("understand", "Extract facts", "llm"), ("decide", "Run decisions", "s1"),
                                  ("combine", "Combine results", "app"), ("answer", "Write answer", "llm")):
             yield _ev(id=sid, label=label, kind=kind, status="skipped", ms=0, detail="not needed")
         yield {"type": "token", "text": chat}
-        yield {"type": "final", "data": _final(chat, "answered", [], "small_talk", 1.0, None, steps, t0, False)}
-        _log(org_id, question, "small_talk", "answered", False, t0)
+        yield {"type": "final", "data": _final(chat, "answered", [], intent, 1.0, None, steps, t0, False)}
+        _log(org_id, question, intent, "answered" if as_answered else "no_knowledge", False, t0)
         return
 
     # 1. Retrieval (tenant-scoped) -------------------------------------------------
@@ -408,6 +407,8 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
         msg = ("This assistant doesn't have any documents yet, so I can't answer questions." if ctx.ready_count == 0
                else "I couldn't find anything about that in the organization's documents, so I won't guess. "
                     "Please contact the organization directly for help.")
+        if ctx.ready_count:
+            msg = smalltalk.out_of_scope_message(question, ctx.assistant_name, ctx.org_name) or msg
         for sid, label, kind in (("choose", "Choose policy", "s1"), ("understand", "Extract facts", "llm"),
                                  ("decide", "Run decisions", "s1"), ("combine", "Combine results", "app"),
                                  ("answer", "Write answer", "llm")):

@@ -71,7 +71,7 @@ Limits (10 PDFs, 20 pages, 10 MB) are `MAX_DOCS`, `MAX_PAGES`, `MAX_PDF_MB`.
 
 ### Run the tests
 ```bash
-cd backend && uv run pytest -q      # 44 tests, offline, no model needed
+cd backend && uv run pytest -q      # 60 tests, offline, no model needed
 ```
 
 ---
@@ -207,7 +207,7 @@ Interactive docs: `/docs`.
 
 ## Tests and evaluation
 
-- **Unit and API tests**: `cd backend && uv run pytest -q` (44 passing; offline).
+- **Unit and API tests**: `cd backend && uv run pytest -q` (60 passing; offline).
 - **End-to-end evaluation** with the real models: `uv run python ../scripts/seed_and_eval.py` runs `sample_data/test_questions.json` (19 questions, 2 organizations, 6 PDFs) and checks status, verdict and cited document for each.
 
 | Coverage | Questions |
