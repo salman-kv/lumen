@@ -195,7 +195,8 @@ def test_follow_up_answer_uses_previous_question(client, org_a):
     assert r.json()["status"] == "answered" and r.json()["decisions"]["verdict"] == "eligible"
 
 
-@pytest.mark.parametrize("msg", ["hi", "Hello!", "hey there", "thanks", "what can you do?", "who are you", "Good morning"])
+@pytest.mark.parametrize("msg", ["hi", "Hello!", "hey there", "thanks", "what can you do?", "who are you", "Good morning",
+                                 "helo", "hellooo", "thankyou", "whats up"])
 def test_small_talk_is_answered_without_search(client, org_a, msg):
     _, token = org_a
     r = ask(client, token, msg)

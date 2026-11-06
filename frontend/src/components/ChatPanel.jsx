@@ -113,9 +113,10 @@ function BotMessage({ m, onRetry }) {
   )
 }
 
-export default function ChatPanel({ token, embedded = false, className = '' }) {
+export default function ChatPanel({ token, embedded = false, className = "", preview = null }) {
   const reduce = useReducedMotion()
-  const [cfg, setCfg] = useState(null)
+  const [baseCfg, setCfg] = useState(null)
+  const cfg = baseCfg && preview ? { ...baseCfg, ...preview } : baseCfg
   const [cfgError, setCfgError] = useState(null)
   const [msgs, setMsgs] = useState([])
   const [input, setInput] = useState('')

@@ -1,6 +1,7 @@
 """Small talk: greetings, thanks, "who are you", "what can you do". Answered by the app (no retrieval, no LLM),
 so "hi" never falls into the "not found in the knowledge base" guard and replies are instant.
 Only whole messages that are small talk match; anything with real content goes through the normal pipeline."""
+import difflib
 import re
 
 GREETING = re.compile(r"^(hi+|hello+|hey+|hiya|howdy|yo|hola|namaste|greetings|good (morning|afternoon|evening|day)|"
@@ -15,6 +16,22 @@ HELP = re.compile(r"^(help|help me|what can you do|what can i ask( you)?|what do
 ACK = re.compile(r"^(ok|okay|k|cool|nice|great|awesome|alright|fine|sure|good|got it|i see|understood)$")
 
 
+VOCAB = ["hi", "hello", "hey", "hiya", "howdy", "hola", "greetings", "morning", "afternoon", "evening", "thanks", "thank", "thx",
+         "bye", "goodbye", "help", "who", "what", "are", "you", "good", "there", "please", "whats", "sup", "thank"]
+
+
+def _fix_typos(t: str) -> str:
+    """"helo" -> "hello", "thankyou" -> "thank you": correct near-misses of small-talk words (short messages only)."""
+    words = t.split()
+    if len(words) > 3:
+        return t
+    out = []
+    for w in words:
+        m = difflib.get_close_matches(w, VOCAB, n=1, cutoff=0.8) if len(w) >= 3 and w not in VOCAB else []
+        out.append(m[0] if m else w)
+    return " ".join(out).replace("thankyou", "thank you")
+
+
 def _norm(text: str) -> str:
     t = re.sub(r"[^\w\s']", " ", text.lower())
     return re.sub(r"\s+", " ", t).strip()
@@ -27,6 +44,7 @@ def _topics(docs: list[str]) -> str:
 
 def reply(text: str, assistant: str, org: str, suggestions: list[str], docs: list[str]) -> str | None:
     t = _norm(text)
+    t = _fix_typos(t) if len(t.split()) <= 3 else t
     if not t or len(t.split()) > 6:
         return None
     ask = ""

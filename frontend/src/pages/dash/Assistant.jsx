@@ -62,7 +62,7 @@ export default function Assistant() {
   const embed = embedTab === 'script' ? assistant.embed_script : assistant.embed_iframe
   return (
     <>
-      <PageHeader title="Assistant">Customize how your assistant looks, then share the link or embed it. The preview on the right is the real thing.</PageHeader>
+      <PageHeader title="Assistant">Customize how your assistant looks, then share the link or embed it. The preview on the right is the real assistant: it updates as you type, and you can chat with it. Click Save to publish your changes.</PageHeader>
       <div className="grid items-start gap-6 xl:grid-cols-[1fr_24rem]">
         <div className="min-w-0 space-y-6">
           <section className="card p-5 sm:p-6">
@@ -126,8 +126,8 @@ export default function Assistant() {
         </div>
 
         <aside className="min-w-0 xl:sticky xl:top-8">
-          <p className="mb-2 text-sm font-semibold">Live preview</p>
-          <div className="h-[34rem] sm:h-[38rem]"><ChatPanel key={assistant.token + assistant.assistant_name + assistant.brand_color + assistant.welcome_message + assistant.suggestions.join()} token={assistant.token} className="h-full" /></div>
+          <p className="mb-2 text-sm font-semibold">Live preview <span className="font-normal text-muted">{dirty ? "(unsaved changes)" : "(what visitors see)"}</span></p>
+          <div className="h-[34rem] sm:h-[38rem]"><ChatPanel key={assistant.token} token={assistant.token} className="h-full" preview={{ name: form.assistant_name || assistant.assistant_name, color: form.brand_color, welcome: form.welcome_message, suggestions: form.suggestions.filter(Boolean) }} /></div>
           <button onClick={() => nav('/app/usage')} className="mt-3 text-sm font-semibold text-accent hover:underline">See what visitors asked</button>
         </aside>
       </div>
