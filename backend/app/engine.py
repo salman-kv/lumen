@@ -14,7 +14,7 @@ from typing import AsyncIterator
 
 import numpy as np
 
-from . import classifier, llm, models_s1, rules
+from . import classifier, llm, models_s1, rules, smalltalk
 from .config import settings
 from .db import Document, Organization, QuestionLog, Rule, SessionLocal
 from .retrieval import Hit, retrieve
@@ -142,11 +142,17 @@ def pattern_facts(question: str, fields: dict[str, str]) -> dict:
         words = [w for w in f.split("_")[1:] if len(w) > 2]
         if not words:
             continue
-        pos = [low.find(w) for w in words]
-        if any(p < 0 for p in pos):
-            continue
-        start = max(0, min(pos) - 30)
-        before = low[start:min(pos)]
+        # Anchor on the words appearing together ("sports ... scholarship"), so an earlier stray "scholarship"
+        # (e.g. in a previous question about the Merit Scholarship) can't hide a negation like "no sports scholarship".
+        seq = re.search(r".{0,20}?".join(re.escape(w) for w in words), low)
+        if seq:
+            at = seq.start()
+        else:
+            pos = [low.find(w) for w in words]
+            if any(p < 0 for p in pos):
+                continue
+            at = min(pos)
+        before = low[max(0, at - 30):at]
         facts[f] = False if NEG.search(before) else True
     return facts
 
@@ -336,6 +342,18 @@ def build_references(hits: list[Hit], results: list[dict], best: float) -> list[
     return refs
 
 
+def _smalltalk(org_id: int, question: str) -> str | None:
+    if len(question.split()) > 6:
+        return None
+    db = SessionLocal()
+    try:
+        org = db.get(Organization, org_id)
+        docs = [d.filename for d in db.query(Document).filter(Document.org_id == org_id, Document.status == "ready")]
+        return smalltalk.reply(question, org.assistant_name, org.name, list(org.suggestions or []), docs)
+    finally:
+        db.close()
+
+
 def _ev(**kw):
     return {"type": "step", **kw}
 
@@ -352,6 +370,20 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
 
     def running(step_id, label, kind):
         return _ev(id=step_id, label=label, kind=kind, status="running", ms=0, detail="")
+
+    # 0. Small talk ("hi", "thanks", "what can you do") is answered by the app: instant, no search, no LLM
+    chat = await asyncio.to_thread(_smalltalk, org_id, question)
+    if chat:
+        t = time.perf_counter()
+        yield done("classify", "Classify question", "s1", t, "small talk (rule)")
+        for sid, label, kind in (("retrieve", "Search documents", "s1"), ("choose", "Choose policy", "s1"),
+                                 ("understand", "Extract facts", "llm"), ("decide", "Run decisions", "s1"),
+                                 ("combine", "Combine results", "app"), ("answer", "Write answer", "llm")):
+            yield _ev(id=sid, label=label, kind=kind, status="skipped", ms=0, detail="not needed")
+        yield {"type": "token", "text": chat}
+        yield {"type": "final", "data": _final(chat, "answered", [], "small_talk", 1.0, None, steps, t0, False)}
+        _log(org_id, question, "small_talk", "answered", False, t0)
+        return
 
     # 1. Retrieval (tenant-scoped) -------------------------------------------------
     yield running("retrieve", "Search knowledge base", "s1")
@@ -408,7 +440,10 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
         # 4. LLM understands the question  ||  S1 scores the evidence (parallel)
         yield running("understand", "Extract facts", "llm")
         t = time.perf_counter()
-        llm_task = asyncio.create_task(llm_facts(question, fields)) if settings.llm_provider != "mock" else None
+        # The LLM only fills numeric gaps (yes/no facts are keyword-checked), so skip the slow call when the
+        # patterns already found every number this policy needs.
+        gaps = [f for f in fields if not f.startswith(("holds_", "has_")) and f not in quick]
+        llm_task = asyncio.create_task(llm_facts(question, fields)) if (settings.llm_provider != "mock" and gaps) else None
         score_task = asyncio.create_task(decide_score(question, [h.text for h in hits]))
         facts = dict(quick)
         detail_note = "patterns"

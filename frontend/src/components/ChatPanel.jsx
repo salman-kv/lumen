@@ -137,6 +137,9 @@ export default function ChatPanel({ token, embedded = false, className = '' }) {
   async function send(q) {
     const question = (q ?? input).trim()
     if (!question || busy) return
+    // Answering a "more information needed" reply: send the earlier question along so the new facts combine with it.
+    const prevBot = msgs[msgs.length - 1]
+    const context = prevBot?.final?.status === 'needs_info' ? msgs[msgs.length - 2]?.text || '' : ''
     lastQ.current = question
     setInput(''); setBusy(true)
     setMsgs((ms) => [...ms, { role: 'user', text: question }, { role: 'bot', text: '', steps: [], pending: true }])
@@ -152,7 +155,7 @@ export default function ChatPanel({ token, embedded = false, className = '' }) {
         else if (ev.type === 'replace') patchLast((m) => ({ ...m, text: ev.text }))
         else if (ev.type === 'final') patchLast((m) => ({ ...m, pending: false, final: ev.data, text: m.text || ev.data.answer }))
         else if (ev.type === 'error') patchLast((m) => ({ ...m, pending: false, error: true, text: ev.message }))
-      }, abortRef.current.signal)
+      }, abortRef.current.signal, context)
       patchLast((m) => (m.pending ? { ...m, pending: false, error: true, text: m.text || 'The answer was interrupted. Please try again.' } : m))
     } catch (e) {
       patchLast((m) => ({ ...m, pending: false, error: true, text: e.message }))

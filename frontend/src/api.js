@@ -55,12 +55,12 @@ export function uploadFile(path, file, onProgress, method = 'POST') {
 }
 
 /** Public assistant: stream pipeline steps + answer tokens over SSE. */
-export async function askStream(token, question, onEvent, signal) {
+export async function askStream(token, question, onEvent, signal, context = '') {
   let res
   try {
     res = await fetch('/api/ask/stream', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-      body: JSON.stringify({ token, question }),
+      body: JSON.stringify({ token, question, context }),
     })
   } catch (e) {
     if (e.name === 'AbortError') return

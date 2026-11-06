@@ -178,3 +178,32 @@ def test_question_with_no_facts_asks_for_information_not_a_verdict(client, org_b
     r = ask(client, tb, "Can I work remotely?")
     assert r["status"] == "needs_info" and r["decisions"]["verdict"] == "need_info"
     assert r["decisions"]["facts"] == {}
+
+
+def test_follow_up_negation_not_hidden_by_earlier_question():
+    from app.engine import pattern_facts
+    fields = {"holds_sports_scholarship": "holds a sports scholarship"}
+    q = "Am I eligible for the Merit Scholarship? I am a third year student with 3.8 GPA and no sports scholarship"
+    assert pattern_facts(q, fields)["holds_sports_scholarship"] is False
+
+
+def test_follow_up_answer_uses_previous_question(client, org_a):
+    _, token = org_a
+    r = client.post("/api/ask", json={"token": token, "question": "I am a third year student with 3.8 GPA and no sports scholarship",
+                                      "context": "Am I eligible for the Merit Scholarship?"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "answered" and r.json()["decisions"]["verdict"] == "eligible"
+
+
+@pytest.mark.parametrize("msg", ["hi", "Hello!", "hey there", "thanks", "what can you do?", "who are you", "Good morning"])
+def test_small_talk_is_answered_without_search(client, org_a, msg):
+    _, token = org_a
+    r = ask(client, token, msg)
+    assert r["status"] == "answered" and r["question_type"]["label"] == "small_talk"
+    assert r["references"] == [] and "couldn't find" not in r["answer"]
+
+
+def test_real_questions_are_not_small_talk(client, org_a):
+    _, token = org_a
+    r = ask(client, token, "hi what is the refund policy")
+    assert r["question_type"]["label"] != "small_talk"

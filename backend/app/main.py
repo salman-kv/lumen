@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import time
@@ -24,7 +25,10 @@ from .security import current_org, hash_password, make_jwt, verify_password
 @asynccontextmanager
 async def lifespan(_):
     init_db()
+    warm = [asyncio.create_task(llm.warmup()), asyncio.create_task(asyncio.to_thread(models_s1.warmup))]
     yield
+    for t in warm:
+        t.cancel()
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
@@ -266,6 +270,13 @@ def usage(org: Organization = Depends(current_org), db: Session = Depends(get_db
 class AskIn(BaseModel):
     token: str
     question: str
+    context: str = ""  # earlier question, when the user is answering a "more information needed" reply
+
+
+def _with_context(body: AskIn) -> str:
+    q = _clean_question(body.question)
+    prev = (body.context or "").strip()[:1000]
+    return f"{prev} {q}" if prev else q
 
 
 def _org_by_token(db: Session, token: str) -> Organization:
@@ -295,7 +306,7 @@ def public_assistant(token: str, db: Session = Depends(get_db)):
 @app.post("/api/ask")
 async def ask(body: AskIn, request: Request, db: Session = Depends(get_db)):
     org = _org_by_token(db, body.token)
-    question = _clean_question(body.question)
+    question = _with_context(body)
     org_id = org.id
     db.close()
     rate_limit(f"{body.token}:{request.client.host if request.client else ''}")
@@ -309,7 +320,7 @@ async def ask(body: AskIn, request: Request, db: Session = Depends(get_db)):
 @app.post("/api/ask/stream")
 async def ask_stream(body: AskIn, request: Request, db: Session = Depends(get_db)):
     org = _org_by_token(db, body.token)
-    question = _clean_question(body.question)
+    question = _with_context(body)
     org_id = org.id
     db.close()
     rate_limit(f"{body.token}:{request.client.host if request.client else ''}")

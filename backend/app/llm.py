@@ -43,7 +43,7 @@ async def chat_json(system: str, user: str) -> dict:
             if p == "ollama":
                 r = await c.post(f"{settings.ollama_url}/api/chat", json={
                     "model": settings.ollama_model, "stream": False, "format": "json",
-                    "options": {"temperature": 0, "num_ctx": 4096},
+                    "keep_alive": "30m", "options": {"temperature": 0, "num_ctx": 4096},
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
                 r.raise_for_status()
                 return _extract_json(r.json()["message"]["content"])
@@ -71,7 +71,7 @@ async def stream_text(system: str, user: str, fallback: str = "") -> AsyncIterat
         async with httpx.AsyncClient(timeout=settings.llm_timeout) as c:
             if p == "ollama":
                 async with c.stream("POST", f"{settings.ollama_url}/api/chat", json={
-                        "model": settings.ollama_model, "stream": True,
+                        "model": settings.ollama_model, "stream": True, "keep_alive": "30m",
                         "options": {"temperature": 0.2, "num_ctx": 4096, "num_predict": 320},
                         "messages": [{"role": "system", "content": system},
                                      {"role": "user", "content": user}]}) as r:
@@ -117,3 +117,16 @@ async def health() -> dict:
             return {"provider": p, "model": settings.openai_model, "ok": bool(settings.openai_api_key)}
     except Exception:
         return {"provider": p, "ok": False}
+
+
+async def warmup() -> None:
+    """Load the model into memory at startup so the first real question isn't slow. Failures are ignored."""
+    if settings.llm_provider != "ollama":
+        return
+    try:
+        async with httpx.AsyncClient(timeout=settings.llm_timeout) as c:
+            await c.post(f"{settings.ollama_url}/api/chat", json={
+                "model": settings.ollama_model, "stream": False, "keep_alive": "30m",
+                "messages": [{"role": "user", "content": "hi"}], "options": {"num_predict": 1}})
+    except Exception:
+        pass
