@@ -25,6 +25,10 @@ NEG = re.compile(r"\b(no|not|don't|dont|do not|doesn't|never|without|haven't|hav
 POS = re.compile(r"\b(have|has|hold|holds|holding|receive|receiving|received|existing|current|currently|already|got|with|on)\b")
 MODAL = re.compile(r"\b(can i|could i|am i|do i|would i|will i|may i|eligible|qualify|entitled|allowed|permitted|"
                    r"does my|will my|is it ok|am i able)\b")
+INFO_START = re.compile(r"^(what|which|who|whom|when|where|why|how (much|many|long|often|early|late)|list|tell me|explain|"
+                        r"describe|give me)\b")
+ELIGIBILITY_WORDS = re.compile(r"\b(eligible|eligibility|qualify|qualifies|entitled|am i allowed|can i get|can i receive|"
+                               r"do i get|will i get|would i get)\b")
 FACT_NUMERIC = {"gpa", "year", "tenure_months", "attendance_percent", "amount", "notice_days", "days_per_week",
                 "credits"}
 
@@ -426,6 +430,9 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
     modal = bool(MODAL.search(question.lower()))
     # a decision is only meaningful if the user states facts about themselves or asks "can I / am I eligible"
     eligibility_like = (qtype == "eligibility" and (modal or bool(quick))) or (modal and bool(quick))
+    # "What GPA do I need for X?" or "How many days do I get?" ask for information, not for a verdict on the user
+    if INFO_START.match(question.strip().lower()) and not ELIGIBILITY_WORDS.search(question.lower()):
+        eligibility_like = False
     use_decisions = bool(benefit_rules) and eligibility_like
 
     decisions: dict | None = None
@@ -508,6 +515,17 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
             decision_text += "\nAsk the user for: " + ", ".join(missing)
     elif decisions.get("compare_rules"):
         decision_text = "KNOWN CONDITIONS:\n" + "\n".join(decisions["compare_rules"])
+    tier = None if verdict else amount_tier(question, hits)
+    if tier:  # Choice decision made by the app: which approval level applies to this amount
+        amt = f"{tier['amount']:,.0f}" if tier["amount"] == int(tier["amount"]) else f"{tier['amount']:,.2f}"
+        sentence = (f"For an amount of {amt}, the required approver is {tier['approver']} "
+                    f"({tier['document']}, p.{tier['page']}).")
+        decisions["tier"] = {"amount": tier["amount"], "approver": tier["approver"]}
+        decision_text = f"Policy check result (computed by the app, do not change it): {sentence}"
+        fallback = sentence
+        refs.insert(0, {"document": tier["document"], "page": tier["page"], "snippet": tier["evidence"][:300],
+                        "score": None, "kind": "rule"})
+        refs = [refs[0]] + [r for r in refs[1:] if (r["document"], r["page"]) != (tier["document"], tier["page"])]
     user_prompt = f"Question: {question}\n\n{decision_text}\n\nContext:\n{_context_block(hits)}\n\nAnswer:"
     system = (DECISION_SYSTEM if verdict else ANSWER_SYSTEM).format(assistant=ctx.assistant_name, org=ctx.org_name)
     answer, degraded = "", False
@@ -522,8 +540,13 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
         answer = fallback
         yield {"type": "token", "text": answer}
     corrected = False
-    if not degraded and contradicts(answer, verdict):
+    if not degraded and (contradicts(answer, verdict) or (tier and tier["approver"].lower() not in answer.lower())):
         corrected, answer = True, fallback
+        yield {"type": "replace", "text": answer}
+    doc_names = list(dict.fromkeys([r["document"] for r in refs] + [h.document for h in hits]))
+    fixed = fix_citations(answer, doc_names)
+    if fixed != answer:
+        answer = fixed
         yield {"type": "replace", "text": answer}
     yield done("answer", "Write answer", "llm", t,
                "template fallback (LLM unavailable)" if degraded else
@@ -549,3 +572,64 @@ def _log(org_id, question, qtype, outcome, used, t0):
         db.commit()
     finally:
         db.close()
+
+
+# ---- amount tiers ("Expenses above $500 require approval from a Director") -------------------------------------
+# A Choice decision made by the app, not the LLM: models routinely pick the wrong tier when reasoning about numbers.
+_MONEY = r"[$₹€£]\s?(\d[\d,]*(?:\.\d+)?)"
+_TIER = re.compile(r"\b(up to|upto|above|over|exceeding|more than|greater than|below|under|less than|at most)\s+"
+                   + _MONEY + r"[^.;]*?\b(?:can be approved by|approved by|require[s]?(?: approval)?(?: from| by)?|"
+                   r"needs? approval (?:from|by)|must be approved by)\s+(?:your |a |an |the )?([A-Za-z][A-Za-z ]{2,40}?)"
+                   r"(?=[.;,]|$|\s+(?:Expenses?|Claims?|Purchases?|Amounts?|Submit)\b)", re.I)
+
+
+def question_amount(question: str) -> float | None:
+    m = re.search(_MONEY, question) or re.search(r"(\d[\d,]*(?:\.\d+)?)\s*(?:dollars|usd|rupees|inr|euros|eur|pounds)",
+                                                 question, re.I)
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def amount_tier(question: str, hits: list[Hit]) -> dict | None:
+    amount = question_amount(question)
+    if amount is None:
+        return None
+    tiers = []
+    for h in hits[:4]:
+        for sent in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", h.text)):  # PDF line wraps must not cut a name
+            for m in _TIER.finditer(sent):
+                kind = m.group(1).lower()
+                tiers.append((kind in ("up to", "upto", "below", "under", "less than", "at most"),
+                              float(m.group(2).replace(",", "")), m.group(3).strip(), h, sent.strip()))
+    if not tiers:
+        return None
+    over = [t for t in tiers if not t[0] and amount > t[1]]
+    if over:
+        pick = max(over, key=lambda t: t[1])
+    else:
+        under = [t for t in tiers if t[0] and amount <= t[1]]
+        if not under:
+            return None
+        pick = min(under, key=lambda t: t[1])
+    _, _, who, hit, sent = pick
+    return {"amount": amount, "approver": who, "document": hit.document, "page": hit.page, "evidence": sent}
+
+
+def fix_citations(answer: str, documents: list[str]) -> str:
+    """Small models shorten or re-space file names ("Doc.pdf", "Remote Work Policy.pdf"). Snap any cited .pdf name
+    to the real document name, so every citation points at a file that exists."""
+    if not documents:
+        return answer
+    for d in documents:  # "Remote Work Policy.pdf" / "remote_work_policy.pdf" -> the real name
+        stem = re.escape(d[:-4]).replace("_", "[ _]")
+        answer = re.sub(stem + r"\.pdf", d, answer, flags=re.I)
+    known = {d.lower() for d in documents}
+
+    def snap(m: re.Match) -> str:
+        name = m.group(0)
+        if name.lower() in known:
+            return next(d for d in documents if d.lower() == name.lower())
+        words = set(re.findall(r"[a-z0-9]+", name.lower())) - {"pdf", "doc", "document"}
+        # the document sharing the most words with the cited name; otherwise the answer's primary source
+        best = max(documents, key=lambda d: len(words & set(re.findall(r"[a-z0-9]+", d.lower()))))
+        return best if words & set(re.findall(r"[a-z0-9]+", best.lower())) else documents[0]
+    return re.sub(r"[\w\-]+\.pdf", snap, answer, flags=re.I)

@@ -290,3 +290,59 @@ def test_real_questions_survive_the_router(client, org_a):
     for q in ["What is the refund policy if I withdraw from a semester?", "How do I appeal a scholarship decision?",
               "Can I get the sports scholarship if I am in my first year?"]:
         assert ask(client, token, q)["question_type"]["label"] not in {"blocked", "unclear", "human", "language", "abuse"}
+
+
+# ---- audit fixes: amount tiers, citation names, informational questions, short generic questions
+
+def _hit(text, doc="Expense_Policy.pdf", page=1):
+    from app.retrieval import Hit
+    return Hit(1, 1, doc, page, text, 0.9)
+
+
+EXPENSE = ("Expenses up to $500 can be approved by your line manager. Expenses above $500 require "
+           "approval from a Director. Expenses above $5,000 require approval from the Finance Committee.")
+
+
+@pytest.mark.parametrize("amount,who", [(300, "line manager"), (500, "line manager"), (900, "Director"),
+                                        (5000, "Director"), (5001, "Finance Committee"), (20000, "Finance Committee")])
+def test_amount_tier_picks_the_right_approver(amount, who):
+    from app.engine import amount_tier
+    t = amount_tier(f"Who approves a ${amount:,} expense?", [_hit(EXPENSE)])
+    assert t and t["approver"] == who
+
+
+def test_amount_tier_ignores_questions_without_an_amount():
+    from app.engine import amount_tier
+    assert amount_tier("Who approves expenses?", [_hit(EXPENSE)]) is None
+
+
+def test_citations_are_snapped_to_real_file_names():
+    from app.engine import fix_citations
+    docs = ["Remote_Work_Policy.pdf", "Leave_Policy.pdf"]
+    assert fix_citations("See Remote Work Policy.pdf, p.1", docs) == "See Remote_Work_Policy.pdf, p.1"
+    assert fix_citations("Based on the Leave_Policy.pdf, p.3 you qualify", docs) == "Based on the Leave_Policy.pdf, p.3 you qualify"
+    assert fix_citations("(Doc.pdf, p.3)", docs).endswith("pdf, p.3)") and "Doc.pdf" not in fix_citations("(Doc.pdf, p.3)", docs)
+
+
+def test_information_question_is_not_treated_as_an_eligibility_check(client, org_a):
+    _, token = org_a
+    r = ask(client, token, "What GPA do I need for the merit scholarship?")
+    assert r["status"] != "needs_info" and (r["decisions"] or {}).get("path") != "decision"
+
+
+@pytest.mark.parametrize("q", ["What is the refund policy?", "WHAT IS THE REFUND POLICY???", "what is the refund policy"])
+def test_short_generic_question_still_finds_its_passage(client, org_a, q):
+    _, token = org_a
+    r = ask(client, token, q)
+    assert r["status"] == "answered" and any(x["document"] == "Fee_Policy.pdf" for x in r["references"])
+
+
+def test_shortened_citation_snaps_to_the_matching_document():
+    from app.engine import fix_citations
+    assert fix_citations("(Expense.pdf, p.1)", ["Leave_Policy.pdf", "Expense_Policy.pdf"]) == "(Expense_Policy.pdf, p.1)"
+
+
+def test_amount_tier_survives_pdf_line_wraps():
+    from app.engine import amount_tier
+    wrapped = EXPENSE.replace("Finance Committee", "Finance\nCommittee")
+    assert amount_tier("Who approves a $7,000 expense?", [_hit(wrapped)])["approver"] == "Finance Committee"

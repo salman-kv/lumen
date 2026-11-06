@@ -49,6 +49,22 @@ def _bm25(query: list[str], docs: list[list[str]], k1=1.5, b=0.75) -> list[float
     return scores
 
 
+GENERIC = set("policy policies rule rules information info detail details tell explain procedure process document documents "
+              "many much get need want know give show please would could should will any there about like name "
+              "regarding related thing things".split())
+
+
+def lexical_support(question: str, text: str) -> float:
+    """Short generic questions ("What is the refund policy?") score low with a cross-encoder trained on long
+    queries, even when the passage is exactly right. If every *specific* word of the question appears in the
+    passage, that is real evidence, so give it a moderate support score instead of refusing."""
+    q = {t for t in models_s1.tokens(question) if t not in GENERIC}
+    if not q:
+        return 0.0
+    cov = len(q & set(models_s1.tokens(text))) / len(q)
+    return 0.4 if cov >= 1.0 else cov * 0.15
+
+
 def retrieve(db: Session, org_id: int, question: str, top_k: int | None = None) -> list[Hit]:
     top_k = top_k or settings.top_k
     rows = (db.query(Chunk, Document.filename)
@@ -75,7 +91,8 @@ def retrieve(db: Session, org_id: int, question: str, top_k: int | None = None) 
     rrf = [1 / (60 + rb[i]) + 1 / (60 + rd[i]) for i in range(len(chunks))]
     cand = np.argsort(-np.array(rrf))[: max(top_k * 3, 10)]
     supports = models_s1.rerank(question, [chunks[i].text for i in cand])
-    hits = [Hit(chunks[i].id, chunks[i].doc_id, names[chunks[i].id], chunks[i].page, chunks[i].text, s)
+    hits = [Hit(chunks[i].id, chunks[i].doc_id, names[chunks[i].id], chunks[i].page, chunks[i].text,
+                max(s, lexical_support(question, chunks[i].text)))
             for i, s in zip(cand, supports)]
     hits.sort(key=lambda h: -h.score)
     return hits[:top_k]
