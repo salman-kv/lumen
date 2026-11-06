@@ -8,7 +8,7 @@ System 1 models and application logic**. The LLM only handles language.
 > **Free to run.** The default LLM is [Ollama](https://ollama.com) with `qwen2.5:3b` running locally. No account, no API key.
 
 ## Contents
-[Quick start](#quick-start) · [Architecture](#architecture) · [Knowledge base](#knowledge-base) · [AI architecture](#ai-architecture) · [Security](#security-and-multi-tenant-isolation) · [API](#major-api-endpoints) · [Tests and evaluation](#tests-and-evaluation) · [Limitations](#known-limitations-and-production-improvements)
+[Quick start](#quick-start) · [Architecture](#architecture) · [Knowledge base](#knowledge-base) · [AI architecture](#ai-architecture) · [Security](#security-and-multi-tenant-isolation) · [API](#major-api-endpoints) · [Tests and evaluation](#tests-and-evaluation) · [Limitations](#known-limitations-and-production-improvements) · [Requirements checklist](docs/REQUIREMENTS_CHECKLIST.md)
 
 ---
 
@@ -71,7 +71,7 @@ Limits (10 PDFs, 20 pages, 10 MB) are `MAX_DOCS`, `MAX_PAGES`, `MAX_PDF_MB`.
 
 ### Run the tests
 ```bash
-cd backend && uv run pytest -q      # 30 tests, offline, no model needed
+cd backend && uv run pytest -q      # 44 tests, offline, no model needed
 ```
 
 ---
@@ -207,7 +207,7 @@ Interactive docs: `/docs`.
 
 ## Tests and evaluation
 
-- **Unit and API tests**: `cd backend && uv run pytest -q` (30 passing; offline).
+- **Unit and API tests**: `cd backend && uv run pytest -q` (44 passing; offline).
 - **End-to-end evaluation** with the real models: `uv run python ../scripts/seed_and_eval.py` runs `sample_data/test_questions.json` (19 questions, 2 organizations, 6 PDFs) and checks status, verdict and cited document for each.
 
 | Coverage | Questions |

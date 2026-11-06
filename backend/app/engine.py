@@ -440,10 +440,9 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
         # 4. LLM understands the question  ||  S1 scores the evidence (parallel)
         yield running("understand", "Extract facts", "llm")
         t = time.perf_counter()
-        # The LLM only fills numeric gaps (yes/no facts are keyword-checked), so skip the slow call when the
-        # patterns already found every number this policy needs.
-        gaps = [f for f in fields if not f.startswith(("holds_", "has_")) and f not in quick]
-        llm_task = asyncio.create_task(llm_facts(question, fields)) if (settings.llm_provider != "mock" and gaps) else None
+        # The assignment wants the LLM to understand the question, so it always runs here (in parallel with the
+        # evidence-score model). Its output is grounded against the question text, and patterns win on conflict.
+        llm_task = asyncio.create_task(llm_facts(question, fields)) if settings.llm_provider != "mock" else None
         score_task = asyncio.create_task(decide_score(question, [h.text for h in hits]))
         facts = dict(quick)
         detail_note = "patterns"

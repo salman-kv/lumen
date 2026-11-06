@@ -207,3 +207,52 @@ def test_real_questions_are_not_small_talk(client, org_a):
     _, token = org_a
     r = ask(client, token, "hi what is the refund policy")
     assert r["question_type"]["label"] != "small_talk"
+
+
+# ---- error handling: the failure modes the assignment lists (LLM down, decision model down, processing failure)
+
+ELIGIBILITY_Q = "I'm a second-year student with a 3.6 GPA and I already have a sports scholarship. Am I eligible for the merit scholarship?"
+
+
+def test_llm_failure_degrades_to_a_grounded_answer(client, org_a, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_url", "http://127.0.0.1:9")  # nothing listens here
+    _, token = org_a
+    r = ask(client, token, ELIGIBILITY_Q)
+    assert r["status"] == "answered" and r["degraded"] is True
+    assert r["decisions"]["verdict"] == "not_eligible"  # the decision does not need the LLM
+    assert r["answer"] and r["references"]
+
+
+def test_decision_model_failure_gives_a_clear_error(client, org_a, monkeypatch):
+    from app import engine
+
+    async def boom(*a, **k):
+        raise RuntimeError("model crashed")
+    monkeypatch.setattr(engine, "decide_boolean", boom)
+    _, token = org_a
+    r = ask(client, token, ELIGIBILITY_Q)
+    assert r["status"] == "error" and "trouble" in r["answer"]
+
+
+def test_document_processing_failure_is_reported_not_crashed(client, monkeypatch):
+    from app import models_s1
+    h, _ = register(client, "Failing Org", "failing@example.com")
+
+    def boom(_):
+        raise RuntimeError("embedding model crashed")
+    monkeypatch.setattr(models_s1, "embed", boom)
+    r = client.post("/api/kb/documents", headers=h, files={"file": ("a.pdf", make_pdf(1), "application/pdf")})
+    assert r.status_code == 201
+    doc = client.get("/api/kb/documents", headers=h).json()["documents"][0]
+    assert doc["status"] == "failed" and "couldn't process" in doc["error"]
+
+
+def test_documents_are_not_publicly_downloadable(client, org_a):
+    (h, token) = org_a
+    doc_id = client.get("/api/kb/documents", headers=h).json()["documents"][0]["id"]
+    assert client.get(f"/api/kb/documents/{doc_id}/file").status_code == 401           # no login
+    assert client.get(f"/api/kb/documents/{doc_id}/file",
+                      headers={"Authorization": f"Bearer {token}"}).status_code == 401  # assistant token
+    assert client.get(f"/api/kb/documents/{doc_id}/file", headers=h).status_code == 200
