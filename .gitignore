@@ -16,3 +16,4 @@ node_modules/
 frontend/dist/
 server.log
 .tokens.json
+tools/

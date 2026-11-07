@@ -261,3 +261,11 @@ The repo is ready to deploy as a Docker Space (README header, port 8000, models 
 4. Push this repo to the Space: `git push https://huggingface.co/spaces/<user>/<space> main` (the Space remote asks for your HF username and an access token with write permission).
 
 The login page then shows buttons for the two demo organizations (`SEED_DEMO=true`). Free Spaces have no persistent disk, so data resets on restart, and the demo organizations are recreated automatically. A sleeping Space needs about a minute to wake.
+
+## Share from your PC (free, no account)
+
+Docker Spaces on Hugging Face are now paid, and free cloud tiers (512 MB RAM) are too small for the embedding models. To let reviewers use the app without deploying, run it on your own PC and share a free Cloudflare quick-tunnel link:
+
+1. Start Ollama with `qwen2.5:3b` (`ollama pull qwen2.5:3b`) and make sure `uv` and `curl` are installed.
+2. Double-click `scripts\share_public.bat`. It starts the app (demo organizations are seeded automatically) and prints a `https://….trycloudflare.com` link.
+3. Send the link. The login page has one-click demo organizations. Keep the window open while they test; the link changes on each start.
