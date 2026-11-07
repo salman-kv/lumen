@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import classifier, engine, llm, models_s1
+from . import classifier, demo_seed, engine, llm, models_s1
 from .config import BASE_DIR, settings
 from .db import Chunk, Document, Organization, QuestionLog, Rule, get_db, init_db, new_token
 from .ingest import process_document
@@ -25,7 +25,8 @@ from .security import current_org, hash_password, make_jwt, verify_password
 @asynccontextmanager
 async def lifespan(_):
     init_db()
-    warm = [asyncio.create_task(llm.warmup()), asyncio.create_task(asyncio.to_thread(models_s1.warmup))]
+    warm = [asyncio.create_task(llm.warmup()), asyncio.create_task(asyncio.to_thread(models_s1.warmup)),
+            asyncio.create_task(demo_seed.seed_demo())]
     yield
     for t in warm:
         t.cancel()
@@ -294,6 +295,12 @@ def _clean_question(q: str) -> str:
     if len(q) > 1000:
         raise HTTPException(422, "That question is too long. Please keep it under 1000 characters.")
     return q
+
+
+@app.get("/api/public/demo")
+def public_demo():
+    """Sample logins, only when the hosted demo seeding is on."""
+    return {"accounts": demo_seed.demo_accounts()}
 
 
 @app.get("/api/public/assistant/{token}")

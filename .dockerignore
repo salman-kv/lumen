@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/.venv
+**/__pycache__
+backend/data
+frontend/dist
+server.log
+sample_data/.tokens.json
+sample_data/eval_results.json

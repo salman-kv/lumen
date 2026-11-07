@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { motion, useReducedMotion } from 'motion/react'
 import { ArrowRight, FilePdf, CircleNotch, Eye, EyeSlash, CheckCircle } from '@phosphor-icons/react'
 import { toast } from 'sonner'
+import { api } from '../api'
 import { useAuth } from '../auth'
 import { Logo, ThemeToggle } from '../components/ui'
 
@@ -53,6 +54,8 @@ export default function AuthPage({ mode }) {
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState('')
+  const [demo, setDemo] = useState([])
+  useEffect(() => { api('/public/demo', { auth: false }).then((d) => setDemo(d.accounts || [])).catch(() => {}) }, [])
   if (org) return <Navigate to={loc.state?.from?.startsWith('/app') ? loc.state.from : '/app'} replace />
 
   const errors = {
@@ -116,10 +119,21 @@ export default function AuthPage({ mode }) {
               {isReg ? 'Already have an account?' : 'New here?'}{' '}
               <Link to={isReg ? '/login' : '/register'} className="font-semibold text-accent underline-offset-2 hover:underline">{isReg ? 'Sign in' : 'Create an account'}</Link>
             </p>
-            {!isReg && (
+            {!isReg && (demo.length > 0 ? (
+              <div className="mt-5 rounded-xl bg-surface-2 p-3 text-[13px] text-muted">
+                <p className="flex items-center gap-2 font-medium text-ink"><CheckCircle size={16} className="shrink-0 text-accent" />Reviewing? Use a demo organization</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {demo.map((a) => (
+                    <button key={a.email} type="button" className="btn btn-ghost !py-1.5 !text-[13px]"
+                      onClick={() => { setF({ ...f, email: a.email, password: a.password }); setFormError('') }}>{a.org}</button>
+                  ))}
+                </div>
+                <p className="mt-2">Fills the form. Then press Sign in.</p>
+              </div>
+            ) : (
               <p className="mt-5 flex items-start gap-2 rounded-xl bg-surface-2 p-3 text-[13px] text-muted"><CheckCircle size={16} className="mt-0.5 shrink-0 text-accent" />
                 <span>Demo accounts are created by the seed script. See the README for the email and password.</span></p>
-            )}
+            ))}
           </motion.div>
         </div>
       </main>

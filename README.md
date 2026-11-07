@@ -1,3 +1,13 @@
+---
+title: Lumen
+emoji: 💡
+colorFrom: green
+colorTo: gray
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # Lumen: multi-tenant AI Knowledge & Decision Assistant
 
 Organizations sign up, upload PDF policies, and get a secure public assistant URL they can embed on any website.
@@ -236,3 +246,18 @@ Last full run with `qwen2.5:3b` on CPU: **19/19 pass**; answers take about 5 to 
 - **SQLite and in-process vector search** are right for the 10-document cap; production would use Postgres + pgvector, a job queue for ingestion, and Redis for rate limiting.
 - **Basic auth** by design (no email verification, password reset or MFA). Tokens are stored as plain random values; production would store hashes and add token scopes and expiry.
 - **Observability**: usage counts only. Production: tracing per pipeline step, feedback capture (thumbs are UI-only today), and review queues for "unable to answer" questions.
+
+---
+
+## Free hosting (Hugging Face Spaces)
+
+The repo is ready to deploy as a Docker Space (README header, port 8000, models baked into the image, demo organizations seeded on start).
+
+1. Create a free key at [console.groq.com](https://console.groq.com) (hosted Llama, no card). Free Spaces have no GPU, so this replaces the local Ollama model.
+2. On [huggingface.co](https://huggingface.co) create a **Space**: SDK **Docker**, **Public**.
+3. In the Space, **Settings → Variables and secrets**:
+   - Secrets: `JWT_SECRET` (long random string), `OPENAI_API_KEY` (the Groq key)
+   - Variables: `LLM_PROVIDER=openai_compat`, `OPENAI_BASE_URL=https://api.groq.com/openai/v1`, `OPENAI_MODEL=llama-3.3-70b-versatile`, `PUBLIC_URL=https://<user>-<space>.hf.space`
+4. Push this repo to the Space: `git push https://huggingface.co/spaces/<user>/<space> main` (the Space remote asks for your HF username and an access token with write permission).
+
+The login page then shows buttons for the two demo organizations (`SEED_DEMO=true`). Free Spaces have no persistent disk, so data resets on restart, and the demo organizations are recreated automatically. A sleeping Space needs about a minute to wake.

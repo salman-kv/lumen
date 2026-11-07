@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-secret-change-me-in-production-0123456789"
     jwt_hours: int = 24
 
+    # Hosted demo: create the two sample organizations on start (see demo_seed.py)
+    seed_demo: bool = False
+    seed_base: str = "http://127.0.0.1:8000"
+    sample_dir: Path = BASE_DIR.parent / "sample_data"
+
     # Hard limits from the assignment
     max_docs: int = 10
     max_pages: int = 20
