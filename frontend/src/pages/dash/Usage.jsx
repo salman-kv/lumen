@@ -27,7 +27,7 @@ export default function Usage() {
   return (
     <>
       <PageHeader title="Usage">See what visitors ask and where the documents fall short.</PageHeader>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="usage-tiles" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {tiles.map(({ label, value, Icon, note }, i) => (
           <motion.div key={label} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }} className="card p-5">
             <div className="flex items-center justify-between text-muted"><span className="text-sm font-medium">{label}</span><Icon size={18} /></div>
@@ -90,7 +90,7 @@ function History() {
   const from = data ? (data.total ? (data.page - 1) * PER_PAGE + 1 : 0) : 0
   const to = data ? Math.min(data.page * PER_PAGE, data.total) : 0
   return (
-    <section className="card mt-6 p-5 sm:p-6" aria-labelledby="hist-title">
+    <section data-tour="history" className="card mt-6 p-5 sm:p-6" aria-labelledby="hist-title">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="hist-title" className="font-semibold tracking-tight">Question history</h2>

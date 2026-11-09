@@ -62,7 +62,7 @@ export default function Overview() {
 
       <div className="mb-3 flex items-center justify-between text-sm"><span className="font-semibold">Getting started</span><span className="text-muted">{doneCount} of 3 done</span></div>
       <div className="mb-5 h-1.5 overflow-hidden rounded-full bg-line"><motion.div className="h-full rounded-full bg-accent" animate={{ width: `${(doneCount / 3) * 100}%` }} transition={{ type: 'spring', stiffness: 120, damping: 20 }} /></div>
-      <ol className="space-y-3">{steps.map((s, i) => <Step key={s.title} n={i + 1} active={i === firstOpen} {...s} />)}</ol>
+      <ol data-tour="checklist" className="space-y-3">{steps.map((s, i) => <Step key={s.title} n={i + 1} active={i === firstOpen} {...s} />)}</ol>
 
       <div className="mt-10 grid gap-4 sm:grid-cols-3">
         {tiles.map(({ label, value, sub, Icon }, i) => (
@@ -74,7 +74,7 @@ export default function Overview() {
         ))}
       </div>
       {assistant && (
-        <p className="mt-8 text-sm text-muted">Your public assistant link: <Link to="/app/assistant" className="font-mono text-ink underline-offset-2 hover:underline">{assistant.url.replace(/^https?:\/\//, '').slice(0, 44)}...</Link></p>
+        <p className="mt-8 text-sm text-muted">Your public assistant link: <Link to="/app/assistant" className="break-all font-mono text-ink underline-offset-2 hover:underline">{assistant.url.replace(/^https?:\/\//, '').slice(0, 44)}...</Link></p>
       )}
     </>
   )

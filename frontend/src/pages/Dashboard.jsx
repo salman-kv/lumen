@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { motion } from 'motion/react'
-import { SquaresFour, FilesIcon, Robot, ChartBar, SignOut, ArrowSquareOut } from '@phosphor-icons/react'
+import { SquaresFour, FilesIcon, Robot, ChartBar, SignOut, ArrowSquareOut, Compass } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { Logo, ThemeToggle } from '../components/ui'
+import Tour, { TOUR_KEY } from '../components/Tour'
 import Overview from './dash/Overview'
 import Knowledge from './dash/Knowledge'
 import Assistant from './dash/Assistant'
@@ -28,12 +29,23 @@ export default function Dashboard() {
   const [limits, setLimits] = useState({ max_docs: 10, max_pages: 20, max_pdf_mb: 10 })
   const [assistant, setAssistant] = useState(null)
   const [usage, setUsage] = useState(null)
+  const [tourOpen, setTourOpen] = useState(false)
 
   const loadDocs = useCallback(() => api('/kb/documents').then((r) => { setDocs(r.documents); setLimits(r.limits) }).catch((e) => toast.error(e.message)), [])
   const loadAssistant = useCallback(() => api('/assistant').then(setAssistant).catch((e) => toast.error(e.message)), [])
   const loadUsage = useCallback(() => api('/usage').then(setUsage).catch(() => {}), [])
 
   useEffect(() => { loadDocs(); loadAssistant(); loadUsage() }, [loadDocs, loadAssistant, loadUsage])
+  // First visit: offer the guided tour once (skippable; replay it from "Take the tour").
+  const loaded = docs !== null && !!assistant
+  useEffect(() => {
+    if (!loaded) return
+    let seen = false
+    try { seen = localStorage.getItem(TOUR_KEY) === '1' } catch { /* ignore */ }
+    if (seen) return
+    const t = setTimeout(() => setTourOpen(true), 900)
+    return () => clearTimeout(t)
+  }, [loaded])
   // Poll while any document is still being processed so stages animate live.
   const processing = docs?.some((d) => d.status === 'processing')
   useEffect(() => {
@@ -51,7 +63,7 @@ export default function Dashboard() {
         <aside className="border-b border-line bg-surface lg:sticky lg:top-0 lg:h-[100dvh] lg:border-b-0 lg:border-r">
           <div className="flex h-full flex-col px-3 py-3 lg:px-4 lg:py-6">
             <div className="flex items-center justify-between px-2"><Logo /><div className="lg:hidden"><ThemeToggle /></div></div>
-            <nav aria-label="Dashboard" className="scroll-thin -mx-1 mt-3 flex gap-1 overflow-x-auto px-1 lg:mt-8 lg:flex-col">
+            <nav aria-label="Dashboard" data-tour="nav" className="scroll-thin -mx-1 mt-3 flex gap-1 overflow-x-auto px-1 lg:mt-8 lg:flex-col">
               {NAV.map(({ to, end, label, Icon }) => (
                 <NavLink key={to} to={to} end={end} className={tab}>
                   {({ isActive }) => (<>
@@ -62,8 +74,9 @@ export default function Dashboard() {
               ))}
             </nav>
             <div className="mt-auto hidden space-y-3 lg:block">
+              <button onClick={() => setTourOpen(true)} className="btn btn-ghost w-full justify-between">Take the tour <Compass size={16} /></button>
               {assistant && (
-                <a href={`/a/${assistant.token}`} target="_blank" rel="noreferrer" className="btn btn-ghost w-full justify-between">Open assistant <ArrowSquareOut size={16} /></a>
+                <a href={`/a/${assistant.token}`} target="_blank" rel="noreferrer" data-tour="open-assistant" className="btn btn-ghost w-full justify-between">Open assistant <ArrowSquareOut size={16} /></a>
               )}
               <div className="rounded-2xl bg-surface-2 p-3.5">
                 <p className="truncate text-sm font-semibold">{org?.name}</p>
@@ -87,11 +100,13 @@ export default function Dashboard() {
             </Routes>
             <div className="mt-10 flex items-center justify-between border-t border-line pt-5 text-sm text-muted lg:hidden">
               <span className="truncate">{org?.name}</span>
+              <button onClick={() => setTourOpen(true)} className="inline-flex items-center gap-1.5 font-semibold hover:text-ink"><Compass size={15} />Take the tour</button>
               <button onClick={() => { logout(); nav('/') }} className="inline-flex items-center gap-1.5 font-semibold hover:text-ink"><SignOut size={15} />Log out</button>
             </div>
           </div>
         </main>
       </div>
+      <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
     </DataCtx.Provider>
   )
 }

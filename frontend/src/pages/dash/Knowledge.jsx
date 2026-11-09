@@ -166,7 +166,7 @@ export default function Knowledge() {
       <PageHeader title="Knowledge base">Everything your assistant knows comes from these PDFs. Other organizations can never see them.</PageHeader>
 
       <div className="grid gap-5 md:grid-cols-[1fr_auto]">
-        <div onDragOver={(e) => { e.preventDefault(); !full && setOver(true) }} onDragLeave={() => setOver(false)}
+        <div data-tour="upload" onDragOver={(e) => { e.preventDefault(); !full && setOver(true) }} onDragLeave={() => setOver(false)}
           onDrop={(e) => { e.preventDefault(); setOver(false); if (!full) upload([...e.dataTransfer.files]); else toast.error(`Your knowledge base is full (${limits.max_docs} documents). Delete one first.`) }}
           className={`relative rounded-[20px] border-2 border-dashed p-8 text-center transition-colors sm:p-10 ${over ? 'border-accent bg-accent-soft' : 'border-line bg-surface'} ${full ? 'opacity-60' : ''}`}>
           <motion.span animate={over ? { y: -6, scale: 1.08 } : { y: 0, scale: 1 }} className="mx-auto grid size-14 place-items-center rounded-2xl bg-accent-soft text-accent"><UploadSimple size={28} weight="duotone" /></motion.span>

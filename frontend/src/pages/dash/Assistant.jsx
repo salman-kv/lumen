@@ -65,7 +65,7 @@ export default function Assistant() {
       <PageHeader title="Assistant">Customize how your assistant looks, then share the link or embed it. The preview on the right is the real assistant: it updates as you type, and you can chat with it. Click Save to publish your changes.</PageHeader>
       <div className="grid items-start gap-6 xl:grid-cols-[1fr_24rem]">
         <div className="min-w-0 space-y-6">
-          <section className="card p-5 sm:p-6">
+          <section data-tour="share" className="card p-5 sm:p-6">
             <h2 className="font-semibold tracking-tight">Public link</h2>
             <p className="mt-1 text-sm text-muted">Anyone with this link can ask questions. It never exposes your documents or dashboard.</p>
             <div className="mt-4 flex items-center gap-2 rounded-xl border border-line bg-surface-2 p-1.5 pl-3.5">
@@ -80,7 +80,7 @@ export default function Assistant() {
             </div>
           </section>
 
-          <section className="card p-5 sm:p-6">
+          <section data-tour="embed" className="card p-5 sm:p-6">
             <div className="flex items-center gap-2"><Code size={20} className="text-accent" /><h2 className="font-semibold tracking-tight">Embed on your website</h2></div>
             <div role="tablist" className="mt-4 inline-flex rounded-xl bg-surface-2 p-1">
               {[['script', 'Chat bubble'], ['iframe', 'Inline panel']].map(([k, l]) => (
@@ -93,7 +93,7 @@ export default function Assistant() {
             <div className="mt-3" onCopy={markEmbedded}><CodeBlock code={embed} label={embedTab === 'script' ? 'HTML (script)' : 'HTML (iframe)'} /></div>
           </section>
 
-          <section className="card p-5 sm:p-6">
+          <section data-tour="appearance" className="card p-5 sm:p-6">
             <h2 className="font-semibold tracking-tight">Appearance and greeting</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div><label className="label" htmlFor="aname">Assistant name</label><input id="aname" className="input" maxLength={80} value={form.assistant_name} onChange={set('assistant_name')} /></div>
@@ -125,7 +125,7 @@ export default function Assistant() {
           </section>
         </div>
 
-        <aside className="min-w-0 xl:sticky xl:top-8">
+        <aside data-tour="preview" className="min-w-0 xl:sticky xl:top-8">
           <p className="mb-2 text-sm font-semibold">Live preview <span className="font-normal text-muted">{dirty ? "(unsaved changes)" : "(what visitors see)"}</span></p>
           <div className="h-[34rem] sm:h-[38rem]"><ChatPanel key={assistant.token} token={assistant.token} className="h-full" preview={{ name: form.assistant_name || assistant.assistant_name, color: form.brand_color, welcome: form.welcome_message, suggestions: form.suggestions.filter(Boolean) }} /></div>
           <button onClick={() => nav('/app/usage')} className="mt-3 text-sm font-semibold text-accent hover:underline">See what visitors asked</button>

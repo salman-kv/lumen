@@ -268,4 +268,4 @@ Docker Spaces on Hugging Face are now paid, and free cloud tiers (512 MB RAM) ar
 
 1. Start Ollama with `qwen2.5:3b` (`ollama pull qwen2.5:3b`) and make sure `uv` and `curl` are installed.
 2. Double-click `scripts\share_public.bat`. It starts the app (demo organizations are seeded automatically) and prints a `https://….trycloudflare.com` link.
-3. Send the link. The login page has one-click demo organizations. Keep the window open while they test; the link changes on each start.
+3. Send the link. A first-time visitor to the dashboard gets a skippable guided tour ("Take the tour" replays it). The login page has one-click demo organizations. Keep the window open while they test; the link changes on each start.
