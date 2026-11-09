@@ -3,12 +3,15 @@
 Starter questions help a visitor see what the assistant knows before typing; follow-ups appear under each answer."""
 import re
 
+from . import models_s1
 from .db import Document, Rule, SessionLocal
 
 MAX_SUGGESTIONS = 6
 MORE = "Tell me more details"
 # names the rule miner can produce that are not a benefit a person would ask to be eligible for
 NOISE = {"general policy", "documents", "document", "requirements", "application", "applications", "forms", "form"}
+# section titles too generic to suggest as "Tell me about ..."
+TOPIC_SKIP = NOISE | {"eligibility", "overview", "notes", "criteria", "conditions", "summary", "introduction"}
 
 
 def _title(filename: str) -> str:
@@ -58,7 +61,11 @@ def followups(org_id: int, question: str, status: str, refs: list[dict], custom:
         return all_suggestions(org_id, custom)[:3]
     docs = {r["document"] for r in refs}
     pairs = auto_questions(org_id)
-    related = [q for q, d in pairs if d in docs and not _same(q, question)]
+    # next steps that fit this answer: other sections of the document it came from, then related questions
+    asked = set(models_s1.tokens(question))
+    sections = [f"Tell me about {tp}" for _, tps, fn in doc_topics(org_id) if fn in docs for tp in tps
+                if tp.lower() not in TOPIC_SKIP and not (set(models_s1.tokens(tp)) & asked)]
+    related = sections[:2] + [q for q, d in pairs if d in docs and not _same(q, question)]
     rest = [q for q, d in pairs if d not in docs and not _same(q, question)]
     out = [] if detail else [MORE]
     for q in related + rest:
@@ -95,8 +102,8 @@ def _headings(text: str, title: str) -> list[str]:
     return out
 
 
-def doc_topics(org_id: int, per_doc: int = 5) -> list[tuple[str, list[str]]]:
-    """[(document title, [topics])]: benefit names from the rule cards first, then section titles."""
+def doc_topics(org_id: int, per_doc: int = 5) -> list[tuple[str, list[str], str]]:
+    """[(document title, [topics], filename)]: benefit names from the rule cards first, then section titles."""
     from .db import Chunk
     db = SessionLocal()
     try:
@@ -113,7 +120,7 @@ def doc_topics(org_id: int, per_doc: int = 5) -> list[tuple[str, list[str]]]:
                 for h in _headings(c.text, title):
                     if not any(h.lower() == t.lower() or h.lower() in t.lower() or t.lower() in h.lower() for t in topics):
                         topics.append(h)
-            out.append((title, topics[:per_doc]))
+            out.append((title, topics[:per_doc], d.filename))
         return out
     finally:
         db.close()
@@ -121,7 +128,7 @@ def doc_topics(org_id: int, per_doc: int = 5) -> list[tuple[str, list[str]]]:
 
 def menu_text(org_id: int, max_docs: int = 6) -> str:
     rows = doc_topics(org_id)
-    lines = [f"• {t}: {', '.join(tp)}" if tp else f"• {t}" for t, tp in rows[:max_docs]]
+    lines = [f"• {t}: {', '.join(tp)}" if tp else f"• {t}" for t, tp, _ in rows[:max_docs]]
     if len(rows) > max_docs:
         lines.append(f"• …and {len(rows) - max_docs} more documents")
     return "\n".join(lines)

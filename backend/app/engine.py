@@ -14,7 +14,7 @@ from typing import AsyncIterator
 
 import numpy as np
 
-from . import classifier, llm, models_s1, rules, smalltalk, suggest
+from . import classifier, llm, models_s1, query, rules, smalltalk, suggest
 from .config import settings
 from .db import Document, Organization, QuestionLog, Rule, SessionLocal
 from .retrieval import Hit, retrieve
@@ -67,7 +67,7 @@ def load_context(org_id: int, question: str, top_k: int | None = None) -> Contex
         rs = [RuleView(r.id, r.doc_id, names.get(r.doc_id, "?"), r.page, r.benefit, r.field, r.label, r.operator,
                        r.value, r.evidence)
               for r in db.query(Rule).filter(Rule.org_id == org_id).all()]
-        hits = retrieve(db, org_id, question, top_k) if ready else []
+        hits = retrieve(db, org_id, query.expand(question), top_k) if ready else []
         return Context(org.name, org.assistant_name, hits, rs, len(docs), len(ready))
     finally:
         db.close()
@@ -263,6 +263,36 @@ DETAIL_SYSTEM = (
     "may go on separate lines numbered 1., 2. End with the source, like (Doc.pdf, p.4)."
 )
 
+SIMPLE_SYSTEM = (
+    "You are {assistant}, the assistant of {org}. The user did not fully understand your earlier answer (shown under "
+    "'Earlier in this conversation'). Explain the same thing again in simpler, friendlier words, as you would to someone new "
+    "to the topic: short sentences, everyday words, up to 90 words. Use ONLY the provided context. Keep every number, date "
+    "and condition exact and add nothing new. If the user asked 'really?' or 'why?', confirm what the document says and give "
+    "the reason it states. End with the source, like (Doc.pdf, p.4)."
+)
+
+LIST_SYSTEM = (
+    "You are {assistant}, the assistant of {org}. Answer ONLY from the provided context. The user wants a list: reply with "
+    "at most one short intro sentence, then one item per line, each starting with '- ', up to 8 items. Every item must come "
+    "from the context (names, amounts, dates). End with the source on its own line, like (Doc.pdf, p.4). If the context has "
+    "no such items, say so."
+)
+
+TOPIC_SYSTEM = (
+    "You are {assistant}, the assistant of {org}. The user typed only a topic. Give a short, friendly overview of what the "
+    "documents say about it (up to 90 words): the main facts first (amounts, dates, conditions). Plain text. Use ONLY the "
+    "provided context. Cite like (Doc.pdf, p.4)."
+)
+
+LISTQ = re.compile(r"\b(list|steps|all the|all of the|what are (all )?the|which (ones|are)|types of|kinds of|options|"
+                   r"purposes?|features?|examples of)\b", re.I)
+
+
+def is_topic_only(text: str) -> bool:
+    """One or two words, like "refund" or "late fee": the visitor named a topic, so give an overview of it."""
+    return 1 <= len(re.findall(r"[a-z0-9']+", text.lower())) <= 2
+
+
 HISTORY_NOTE = (" Earlier messages are shown only so you understand what the question refers to; never use them as a "
                 "source of facts.")
 
@@ -319,7 +349,7 @@ def _best_sentence(question: str, hits: list[Hit]) -> str:
     for h in hits[:3]:
         for s in re.split(r"(?<=[.!?])\s+|\n", h.text):
             s = s.strip()
-            if len(s) < 20:
+            if len(s) < 20 or len(s.split()) < 5:  # skip titles and headings
                 continue
             sc = len(q & set(models_s1.tokens(s))) / (1 + len(s) / 400)
             if sc > best_s:
@@ -340,7 +370,9 @@ def fallback_answer(question: str, hits: list[Hit], verdict: str | None, results
 
 
 def _context_block(hits: list[Hit], n: int = 4) -> str:
-    return "\n\n".join(f"[{i}] {h.document}, page {h.page}:\n{h.text}" for i, h in enumerate(hits[:n], 1))
+    """The best passages only: weak ones add tokens (free model tiers allow few a minute) and distract the answer."""
+    keep = [h for h in hits[:n] if h.score >= 0.25 * hits[0].score] if hits else []
+    return "\n\n".join(f"[{i}] {h.document}, page {h.page}:\n{h.text}" for i, h in enumerate(keep, 1))
 
 
 def _history_block(history: list[dict] | None) -> str:
@@ -382,7 +414,7 @@ def _ev(**kw):
 
 
 async def run(org_id: int, question: str, history: list[dict] | None = None, detail: bool = False,
-              asked: str | None = None) -> AsyncIterator[dict]:
+              asked: str | None = None, simple: bool = False) -> AsyncIterator[dict]:
     typed = asked or question  # what the visitor typed (the engine may have prefixed an earlier question)
     t0 = time.perf_counter()
     steps: list[dict] = []
@@ -407,8 +439,9 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
                                  ("combine", "Combine results", "app"), ("answer", "Write answer", "llm")):
             yield _ev(id=sid, label=label, kind=kind, status="skipped", ms=0, detail="not needed")
         yield {"type": "token", "text": chat}
-        more = (await asyncio.to_thread(_followups, org_id, typed, "no_knowledge", [], False)
-                if intent in ("unclear", "bare_reply", "language") else [])
+        # a thank-you, goodbye or "ok" needs no suggestions; everything else gets clickable next steps
+        quiet = intent == "human" or (intent == "small_talk" and smalltalk.is_closing(typed))
+        more = [] if quiet else await asyncio.to_thread(_followups, org_id, typed, "no_knowledge", [], False)
         yield {"type": "final", "data": _final(chat, "answered", [], intent, 1.0, None, steps, t0, False, more)}
         _log(org_id, typed, intent, "answered" if as_answered else "no_knowledge", False, t0, chat)
         return
@@ -416,7 +449,9 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
     # 1. Retrieval (tenant-scoped) -------------------------------------------------
     yield running("retrieve", "Search knowledge base", "s1")
     t = time.perf_counter()
-    ctx = await asyncio.to_thread(load_context, org_id, question, settings.top_k + 3 if detail else None)
+    wants_list, topic_only = bool(LISTQ.search(typed)), is_topic_only(typed)
+    ctx = await asyncio.to_thread(load_context, org_id, question,
+                                  settings.top_k + 3 if (detail or simple or wants_list or topic_only) else None)
     hits = ctx.hits
     best = hits[0].score if hits else 0.0
     yield done("retrieve", "Search knowledge base", "s1", t,
@@ -554,11 +589,14 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
                         "score": None, "kind": "rule"})
         refs = [refs[0]] + [r for r in refs[1:] if (r["document"], r["page"]) != (tier["document"], tier["page"])]
     hist = _history_block(history)
-    wide = detail and not verdict and not tier
+    # how the answer should read: a decision, an explanation again, more detail, a list, a topic overview, or short
+    mode = None if (verdict or tier) else ("simple" if simple else "detail" if detail else "list" if wants_list
+                                           else "topic" if topic_only else None)
+    base = {None: DECISION_SYSTEM if verdict else ANSWER_SYSTEM, "simple": SIMPLE_SYSTEM, "detail": DETAIL_SYSTEM,
+            "list": LIST_SYSTEM, "topic": TOPIC_SYSTEM}[mode]
     user_prompt = (f"{hist}Question: {question}\n\n{decision_text}\n\n"
-                   f"Context:\n{_context_block(hits, 7 if wide else 4)}\n\nAnswer:")
-    system = (DECISION_SYSTEM if verdict else DETAIL_SYSTEM if wide else ANSWER_SYSTEM).format(
-        assistant=ctx.assistant_name, org=ctx.org_name) + (HISTORY_NOTE if hist else "")
+                   f"Context:\n{_context_block(hits, 4 if mode in (None, 'simple') else 7)}\n\nAnswer:")
+    system = base.format(assistant=ctx.assistant_name, org=ctx.org_name) + (HISTORY_NOTE if hist else "")
     answer, degraded = "", False
     try:
         async for tok in llm.stream_text(system, user_prompt, fallback):

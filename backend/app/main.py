@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import classifier, demo_seed, engine, llm, models_s1, suggest
+from . import classifier, demo_seed, engine, llm, models_s1, smalltalk, suggest
 from .config import BASE_DIR, settings
 from .db import Chunk, Document, Organization, QuestionLog, Rule, get_db, init_db, new_token
 from .ingest import process_document
@@ -335,6 +335,15 @@ FILLER = re.compile(r"\b(tell me|more|details?|detailed|elaborate|explain|in dep
                     r"please|can you|could you|give me|an? examples?|examples?|about (it|that|this)|on (it|that|this))\b", re.I)
 
 
+def _prepare(body: AskIn) -> tuple[str, bool, bool]:
+    """(question for the engine, detail?, simple?). "what?" / "I don't understand" / "really?" after an answer means
+    "explain your last answer again, more simply", so the earlier question is asked again in simple words."""
+    q = _clean_question(body.question)
+    if body.history and smalltalk.CLARIFY.match(smalltalk._norm(q)):
+        return body.history[-1].q, True, True
+    return _with_context(body), bool(DETAIL.search(body.question)), False
+
+
 def _history(body: AskIn) -> list[dict]:
     return [t.model_dump() for t in body.history[-4:]]
 
@@ -382,12 +391,12 @@ def public_assistant(token: str, db: Session = Depends(get_db)):
 @app.post("/api/ask")
 async def ask(body: AskIn, request: Request, db: Session = Depends(get_db)):
     org = _org_by_token(db, body.token)
-    question = _with_context(body)
+    question, detail, simple = _prepare(body)
     org_id = org.id
     db.close()
     rate_limit(f"{body.token}:{request.client.host if request.client else ''}")
     final = None
-    async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question)), body.question.strip()):
+    async for ev in engine.run(org_id, question, _history(body), detail, body.question.strip(), simple):
         if ev["type"] == "final":
             final = ev["data"]
     return final
@@ -396,14 +405,14 @@ async def ask(body: AskIn, request: Request, db: Session = Depends(get_db)):
 @app.post("/api/ask/stream")
 async def ask_stream(body: AskIn, request: Request, db: Session = Depends(get_db)):
     org = _org_by_token(db, body.token)
-    question = _with_context(body)
+    question, detail, simple = _prepare(body)
     org_id = org.id
     db.close()
     rate_limit(f"{body.token}:{request.client.host if request.client else ''}")
 
     async def gen():
         try:
-            async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question)), body.question.strip()):
+            async for ev in engine.run(org_id, question, _history(body), detail, body.question.strip(), simple):
                 yield f"data: {json.dumps(ev, default=str)}\n\n"
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Something went wrong while answering. Please try again.'})}\n\n"

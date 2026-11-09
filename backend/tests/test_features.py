@@ -508,3 +508,146 @@ def test_topic_headings_are_extracted_without_wrapped_line_noise():
 def test_unclear_message_offers_starter_chips(client, org_b):
     _, tok = org_b
     assert ask(client, tok, "i want to know more about it")["followups"]
+
+
+# ---- everyday conversation: friendly replies and next steps for simple users ---------------------------------
+
+@pytest.mark.parametrize("msg,intent,chips", [
+    ("lol", "small_talk", False), ("who made you", "small_talk", True), ("are you a bot", "small_talk", True),
+    ("can you help me", "help", True), ("i need help", "help", True), ("i have a question", "help", True),
+    ("what do you know", "overview", True), ("what all the features we have", "overview", True),
+    ("list everything", "overview", True), ("give me a summary", "overview", True),
+    ("what is this about", "overview", True), ("list all the policies", "overview", True),
+    ("i am new here, what should i know", "overview", True), ("anything else", "overview", True),
+    ("this is not helpful", "frustrated", True), ("you are wrong", "frustrated", True),
+    ("what?", "unclear", True), ("hi", "small_talk", True), ("thanks", "small_talk", False),
+])
+def test_everyday_messages_get_a_friendly_reply_and_next_steps(client, org_a, msg, intent, chips):
+    _, tok = org_a
+    d = ask(client, tok, msg)
+    assert d["question_type"]["label"] == intent and d["references"] == []
+    assert "couldn't find" not in d["answer"] and "I can't do that" not in d["answer"]
+    assert bool(d["followups"]) == chips
+    if intent in ("help", "overview", "frustrated", "unclear"):
+        assert "Fee Policy" in d["answer"] or "Scholarship Rules" in d["answer"]  # says what it can do
+
+
+def test_naming_something_specific_is_never_treated_as_an_overview_request(client, org_a):
+    _, tok = org_a
+    for q in ("list the documents I need to submit for admission", "what are all the scholarships",
+              "tell me about the fee waiver", "what is the refund policy"):
+        assert ask(client, tok, q)["question_type"]["label"] not in {"overview", "help", "frustrated", "unclear"}
+
+
+def test_what_after_an_answer_explains_the_last_answer_again(client, org_a):
+    h, tok = org_a
+    first = ask(client, tok, "What is the refund policy?")
+    hist = [{"q": "What is the refund policy?", "a": first["answer"]}]
+    for msg in ("what?", "i dont understand", "really?", "why"):
+        r = client.post("/api/ask", json={"token": tok, "question": msg, "history": hist}).json()
+        assert r["status"] == "answered" and r["references"], msg
+        assert "what you'd like to know" not in r["answer"]
+    logged = client.get("/api/usage/history?per_page=1", headers=h).json()["items"][0]["question"]
+    assert logged == "why"  # the history shows what the visitor typed
+
+
+def test_what_with_nothing_before_it_asks_what_you_mean(client, org_a):
+    _, tok = org_a
+    assert ask(client, tok, "what?")["question_type"]["label"] == "unclear"
+
+
+def test_everyday_words_are_matched_to_policy_words():
+    from app import query
+    out = query.expand("can i get money back if i quit")
+    assert "refund" in out and "withdraw" in out and out.startswith("can i get money back if i quit")
+    assert "tuition" in query.expand("how much do i have to pay")
+    assert "remote" in query.expand("can i work from home")
+    assert query.expand("What is the refund policy?") == "What is the refund policy?"  # nothing to add
+
+
+def test_follow_up_chips_point_to_other_sections_of_the_same_document(client, org_a):
+    _, tok = org_a
+    f = ask(client, tok, "What is the refund policy?")["followups"]
+    assert f[0] == "Tell me more details" and any(c.startswith("Tell me about ") for c in f)
+    assert "Tell me about Refunds" not in f  # not the thing just asked about
+
+
+def test_weak_passages_are_left_out_of_the_prompt():
+    from app.engine import _context_block
+    from app.retrieval import Hit
+    hits = [Hit(1, 1, "a.pdf", 1, "strong", 0.9), Hit(2, 1, "a.pdf", 2, "weak", 0.05), Hit(3, 1, "a.pdf", 3, "medium", 0.5)]
+    block = _context_block(hits)
+    assert "strong" in block and "medium" in block and "weak" not in block
+
+
+# ---- language-model failover: a rate-limited free model must not turn into a worse answer --------------------
+
+import httpx as _httpx
+
+_REAL_CLIENT = _httpx.AsyncClient  # captured before any test replaces it
+
+
+def _fake_models(monkeypatch, handler):
+    import httpx
+    from app import llm
+    from app.config import settings
+    real = _REAL_CLIENT
+    monkeypatch.setattr(settings, "llm_provider", "openai_compat")
+    monkeypatch.setattr(settings, "openai_api_key", "k")
+    monkeypatch.setattr(settings, "openai_model", "main-model")
+    monkeypatch.setattr(settings, "openai_fallback_models", "backup-model")
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    return llm
+
+
+def _sse(*words):
+    import json
+    return ("".join("data: " + json.dumps({"choices": [{"delta": {"content": w}}]}) + "\n\n" for w in words)
+            + "data: [DONE]\n\n").encode()
+
+
+def test_streaming_answer_falls_back_to_the_next_model_when_rate_limited(monkeypatch):
+    import asyncio
+    import json
+    import httpx
+    seen = []
+
+    def handler(request):
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model == "main-model":
+            return httpx.Response(429, json={"error": {"message": "rate limit"}})
+        return httpx.Response(200, content=_sse("Hello", " there world"), headers={"content-type": "text/event-stream"})
+
+    llm = _fake_models(monkeypatch, handler)
+
+    async def run():
+        return "".join([t async for t in llm.stream_text("s", "u")])
+
+    assert asyncio.run(run()) == "Hello there world"  # the odd no-break space is also cleaned
+    assert seen == ["main-model", "backup-model"]
+
+
+def test_json_call_falls_back_too_but_real_errors_are_not_hidden(monkeypatch):
+    import asyncio
+    import json
+    import httpx
+    import pytest as _pytest
+    seen = []
+
+    def handler(request):
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model == "main-model":
+            return httpx.Response(503, json={})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{\"ok\": true}"}}]})
+
+    llm = _fake_models(monkeypatch, handler)
+    assert asyncio.run(llm.chat_json("s", "u")) == {"ok": True}
+    assert seen == ["main-model", "backup-model"]
+
+    seen.clear()
+    llm = _fake_models(monkeypatch, lambda request: (seen.append("x"), httpx.Response(401, json={}))[1])
+    with _pytest.raises(llm.LLMError):  # a bad API key is a real problem: report it, do not hide it
+        asyncio.run(llm.chat_json("s", "u"))
+    assert seen == ["x"]

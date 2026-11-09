@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.groq.com/openai/v1"
     openai_api_key: str = ""
     openai_model: str = "qwen/qwen3.8-27b"
+    # tried in order when the main model is rate-limited (free tiers allow few tokens a minute per model) or unavailable
+    openai_fallback_models: str = "openai/gpt-oss-20b,openai/gpt-oss-120b"
     llm_timeout: float = 120.0
     rules_llm: bool = False  # opt-in: enable with a strong model (e.g. Groq 70B); small local models over-generate
     rules_llm_max_pages: int = 6

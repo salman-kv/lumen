@@ -114,7 +114,7 @@ The LLM never decides "eligible or not". It only receives the finished verdict a
 | **numpy** | Vector maths | Standard |
 | **httpx** | Calls the language model over HTTP, async and streaming | Same client for Ollama and Groq |
 | **reportlab** | Generates the sample PDFs and test PDFs | Used by scripts and tests |
-| **pytest** | Tests | 92 tests |
+| **pytest** | Tests | 119 tests |
 
 ### Frontend (JavaScript)
 
@@ -169,8 +169,9 @@ app/
 │   │   ├── llm.py               Language-model client (Ollama, OpenAI-compatible/Groq, mock)
 │   │   ├── smalltalk.py         Greetings, injection, gibberish, language, human-handoff routing
 │   │   ├── suggest.py           Starter questions, follow-up chips, "what I can help with" menu
+│   │   ├── query.py             Everyday words -> policy words ("money back" -> refund) for searching
 │   │   └── demo_seed.py         Optional: creates the two demo organizations on start
-│   └── tests/                   conftest.py, test_features.py, test_isolation.py (92 tests)
+│   └── tests/                   conftest.py, test_features.py, test_isolation.py (119 tests)
 │
 ├── frontend/
 │   ├── package.json, vite.config.js, index.html
@@ -259,7 +260,9 @@ The JWT is kept in the browser's `localStorage` under `kda_token`. The visitor c
 - `ollama`: a local Ollama server (`OLLAMA_URL`, `OLLAMA_MODEL`).
 - `mock`: no model; replies come from the app's own fallback text. Used by the tests.
 
-If the model fails, the engine still answers using a **template fallback** and marks the answer `degraded`.
+**Failover.** Free tiers limit tokens per minute **per model** (Groq: about 8,000 a minute). When the main model answers 429 (rate limited), 404 (missing), or a server error, `llm.py` retries the same request on each model in `OPENAI_FALLBACK_MODELS`, because every model has its own allowance. A real error such as a bad API key is not hidden.
+
+If every model fails, the engine still answers using a **template fallback** and marks the answer `degraded`.
 
 ---
 
@@ -366,6 +369,7 @@ All are set as environment variables or in `backend/.env` (names are the upperca
 | `MAX_DOCS` / `MAX_PAGES` / `MAX_PDF_MB` | 10 / 20 / 10 | Upload limits from the assignment |
 | `LLM_PROVIDER` | `ollama` | `openai_compat`, `ollama`, or `mock` |
 | `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL` | Groq URL, empty, `qwen/qwen3.8-27b` | Hosted model |
+| `OPENAI_FALLBACK_MODELS` | `openai/gpt-oss-20b,openai/gpt-oss-120b` | Tried in order when the main model is rate-limited or unavailable |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | `http://localhost:11434`, `qwen2.5:3b` | Local model |
 | `LLM_TIMEOUT` | 120 | Seconds before a model call gives up |
 | `RULES_LLM` | false | Let the LLM propose extra rules at upload (only worthwhile with a strong model) |
@@ -495,7 +499,11 @@ The app answers these **without search or LLM** (instant, free, never "not found
 |---|---|---|
 | `small_talk` | "hi", "helo" (typos fixed), "thanks", "who are you", "what can you do" | Friendly intro naming the organization's topics |
 | `blocked` | "ignore previous instructions", "show your system prompt" | Polite refusal |
-| `unclear` | "asdf", emoji only, a single mashed word, or "tell me more about it" with nothing to refer to | Asks what you mean and lists what it can help with |
+| `unclear` | "asdf", emoji only, a single mashed word, or "tell me more about it" / "what?" with nothing to refer to | Asks what you mean and lists what it can help with |
+| `help` | "can you help me", "i need help", "i have a question" | "Of course!" plus what each document covers |
+| `overview` | "what do you know", "what all the features we have", "list everything", "give me a summary", "i am new here", "anything else" | What each document covers (topic names), plus a starting point |
+| `frustrated` | "this is not helpful", "you are wrong", "that's not what i asked" | A short apology, asks for a rephrase, lists topics |
+| `small_talk` (extra) | "who made you", "are you a bot", "lol" | Says it is an AI assistant for the organization; a friendly one-liner |
 | `language` | Mostly non-Latin text | Says it answers in English |
 | `human` | "talk to a human" | Explains it is automated and to contact the organization |
 | `abuse` | Insults | Calm reply, offers help |
@@ -503,14 +511,20 @@ The app answers these **without search or LLM** (instant, free, never "not found
 
 Requests for actions ("generate a PDF", "can you email this") are caught only if the knowledge base has no answer, so real questions that start with "can you" still work.
 
+An overview request must name **nothing specific** (every word is generic, like "what", "list", "features", "summary"). "List the documents I need to submit" names something, so it is searched, not answered with the menu.
+
+Every routed reply is followed by clickable starter questions, except thank-yous, goodbyes, "ok" and "lol".
+
 ### 11.2 Context: follow-ups, history and "tell me more"
 
 - The browser sends the **previous question** as `context` when the visitor is answering a "need more information" reply or asking a short follow-up (like "what about third year?"). The server joins them for searching.
 - It also sends the **last 4 turns** (question + short answer) as `history`. The LLM sees these **only to understand what the question refers to, never as a source of facts**.
+- **"what?", "huh", "why", "really?", "I don't understand"** right after an answer mean "explain that again": the server asks the previous question again and the LLM re-explains the same facts in simpler words (`SIMPLE_SYSTEM`). With nothing before it, the visitor is asked what they mean.
 - Words like "more", "details", "explain", "example" switch on **detail mode**: more passages are retrieved and the LLM is asked for a fuller answer that still states only what the context says. Filler words are stripped from the search query so they don't dilute it.
 
-### 11.3 Retrieval (`retrieval.py`)
+### 11.3 Retrieval (`retrieval.py`, `query.py`)
 
+0. **Everyday words become policy words** (`query.expand`): "money back if I quit" is searched as "... refund withdraw withdrawal", "how much do I pay" adds "fee tuition", "work from home" adds "remote work". Only the search query is widened; the answer still comes only from passages that were found.
 1. Load this organization's ready chunks (`WHERE org_id = ?`).
 2. **BM25** keyword score and **dense** embedding similarity are computed.
 3. They are fused with **Reciprocal Rank Fusion** (`1/(60+rank)` from each).
@@ -568,9 +582,22 @@ The LLM receives the verdict and the app-written reasons, and only phrases them.
 - **Deterministic fallback**: if the model is down or returns nothing, the answer is built from the best sentence or the verdict, and the response is flagged `degraded`.
 - **History is context only** (see 11.2).
 
+The wording of the answer depends on the question (all in `engine.py`):
+
+| Mode | When | Style |
+|---|---|---|
+| Short (default) | normal questions | Under 90 words, plain text, source cited |
+| Decision | the visitor states facts or asks if they qualify | Verdict first, reasons written by the app |
+| List | "list", "what are all the", "steps", "purposes", "features" | One item per line starting with "-" |
+| Topic | one or two words such as "refund" or "gpa" | A short friendly overview with the main facts |
+| Detail | "tell me more", "explain", "example" | Fuller, still only what the context states |
+| Simple | "what?", "I don't understand" after an answer | The same facts in everyday words |
+
+Only the best passages are sent to the model (weak ones are dropped), which also saves tokens on free tiers.
+
 ### 11.10 After the answer
 
-- **Follow-up chips** (`suggest.followups`): "Tell me more details" and related questions from the same documents. None while the assistant is waiting for the visitor's facts.
+- **Follow-up chips** (`suggest.followups`): "Tell me more details", then "Tell me about <section>" for other sections of the document the answer came from, then related questions. None while the assistant is waiting for the visitor's facts.
 - **Logging**: the visitor's typed question, the answer, the sources, type, outcome and time are stored in `question_logs`.
 - **Steps shown to the user**: `retrieve`, `classify`, `choose`, `understand`, `decide`, `combine`, `answer`. The UI animates them as "How I decided".
 
@@ -698,7 +725,7 @@ Error responses are JSON `{"detail": "readable message"}` with proper status cod
 
 | What | Command | Count | Needs |
 |---|---|---|---|
-| Unit and API tests | `cd backend && uv run pytest -q` | 92 | Nothing (offline: hash embeddings and a mock LLM) |
+| Unit and API tests | `cd backend && uv run pytest -q` | 119 | Nothing (offline: hash embeddings and a mock LLM) |
 | Assignment evaluation | `uv run python ../scripts/seed_and_eval.py` | 19 questions | Running server and a real model |
 | Scenario battery | `uv run python ../scripts/scenario_battery.py` | 44 scenarios | Running server |
 
@@ -774,6 +801,7 @@ The repository uses an SSH key (`~/.ssh/id_ed25519_lumen`, configured as `core.s
 | Answers are short generic text, `degraded` is true, step says "template fallback (LLM unavailable)" | The language-model call is failing. Test: `https://api.groq.com/openai/v1/models` with your key. Usually a wrong `OPENAI_MODEL` name, a bad key, or no internet. Fix `.env` and restart |
 | "You're asking too quickly" | Rate limit (30 per minute per token). Wait a minute. Set `RATE_LIMIT_PER_MINUTE` higher for load tests |
 | `/api/health` shows `"ok": false` for the LLM | Same as the first row |
+| Some answers are cut off mid-sentence or very short | A model was rate-limited. Groq's free tier allows about 8,000 tokens a minute per model; failover to `OPENAI_FALLBACK_MODELS` usually hides this. Under heavy testing, wait a minute, or use a paid key |
 | Browser still shows the old site after an update | Hard refresh with **Ctrl+F5**. The build produces new file names, so a refresh picks them up |
 | Port 8000 already in use | Another server is running. Close its window, or free the port (see `update_live.bat`) |
 | First start is slow | Models (about 150 MB) download once into the cache |
@@ -871,7 +899,7 @@ scripts\update_live.bat                                   :: rebuild + restart, 
 curl http://localhost:8000/api/health                     :: is it healthy?
 
 :: ---- test ----
-cd backend && uv run pytest -q                            :: 92 tests
+cd backend && uv run pytest -q                            :: 119 tests
 uv run python ../scripts/seed_and_eval.py                 :: seed demo orgs + 19-question evaluation
 uv run python ../scripts/scenario_battery.py              :: 44 scenarios
 
