@@ -25,9 +25,13 @@ def test_org_b_cannot_get_org_a_knowledge(client, org_a, org_b):
     r = ask(client, tb, Q_SCHOLAR).json()  # Org A's content, asked on Org B's assistant
     assert r["status"] == "no_knowledge"
     assert r["references"] == []
-    assert "Scholarship" not in r["answer"]
+    # the reply may repeat the visitor's own words, but must list only this organization's documents
+    assert not any(x in r["answer"] for x in ("Scholarship Rules", "Fee Policy", "Admissions FAQ", "Northfield", "3.5"))
+    assert "Leave Policy" in r["answer"] and "Expense Policy" in r["answer"]
     r = ask(client, ta, Q_LEAVE).json()  # and vice versa
     assert r["status"] == "no_knowledge"
+    assert not any(x in r["answer"] for x in ("Leave Policy", "Expense Policy", "Remote Work", "Acme"))
+    assert "Scholarship Rules" in r["answer"]
 
 
 def test_retrieval_is_tenant_scoped_at_query_level(client, org_a, org_b):

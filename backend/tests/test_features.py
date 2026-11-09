@@ -463,3 +463,48 @@ def test_history_times_are_marked_utc(client, org_a):
     ask(client, tok, "What is the refund policy?")
     at = client.get("/api/usage/history?per_page=1", headers=h).json()["items"][0]["at"]
     assert at.endswith("+00:00") or at.endswith("Z")
+
+
+# ---- helpful "not found" replies -----------------------------------------------------------------------------
+
+def test_not_found_reply_names_the_question_and_what_the_documents_cover(client, org_a):
+    _, tok = org_a
+    d = ask(client, tok, "What is the capital of Mars?")
+    a = d["answer"]
+    assert d["status"] == "no_knowledge" and d["references"] == []
+    assert "capital of Mars" in a and "won't guess" in a
+    assert "Here's what I can help with" in a
+    for doc in ("Fee Policy", "Scholarship Rules", "Admissions FAQ"):
+        assert doc in a
+    assert "Merit Scholarship" in a and "Refunds" in a  # topics, not just file names
+    assert d["followups"]  # plus clickable starter questions
+
+
+def test_action_request_also_lists_what_the_assistant_can_do(client, org_b):
+    _, tok = org_b
+    a = ask(client, tok, "please generate a pdf for me")["answer"]
+    assert a.startswith("I can't do that") and "Leave Policy" in a
+
+
+def test_vague_message_asks_what_you_mean_and_lists_topics(client, org_b):
+    _, tok = org_b
+    d = ask(client, tok, "i want to know more about it")
+    assert "what you'd like to know more about" in d["answer"] and "Leave Policy" in d["answer"]
+    assert d["question_type"]["label"] == "unclear"
+    # with an earlier question as context it is a real follow-up, not vague
+    r = client.post("/api/ask", json={"token": tok, "question": "tell me more", "context": "Can I work remotely?"}).json()
+    assert r["question_type"]["label"] != "unclear"
+
+
+def test_topic_headings_are_extracted_without_wrapped_line_noise():
+    from app.suggest import _headings
+    text = ("Northfield University Fee Policy\nTuition Fees\nAnnual tuition is $12,000. Fees\nmay be paid in two "
+            "installments.\nLate Payment\nA late fee of 5% applies.\nStudents who withdraw within 14 days of the semester "
+            "start receive a refund. Finance\nCommittee\napproves exceptions.")
+    h = _headings(text, "Fee Policy")
+    assert h == ["Tuition Fees", "Late Payment"]
+
+
+def test_unclear_message_offers_starter_chips(client, org_b):
+    _, tok = org_b
+    assert ask(client, tok, "i want to know more about it")["followups"]

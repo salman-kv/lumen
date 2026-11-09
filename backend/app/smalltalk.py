@@ -80,6 +80,8 @@ INJECTION = re.compile(
 HUMAN = re.compile(r"\b(talk|speak|chat|connect|transfer|escalate)\b.*\b(human|person|agent|representative|someone|staff|"
                    r"real person|support)\b|\b(human|live) (agent|support|help)\b|\bcustomer (service|support)\b")
 ABUSE = re.compile(r"\b(fuck|fucking|shit|bitch|bastard|asshole|idiot|stupid|dumb|useless|crap)\b")
+VAGUE = re.compile(r"^(i (want|need|would like) to (know|learn|understand)|tell me|explain|more|what about|how about|and)"
+                   r"( more)?( about| on)?( (it|that|this|them|those|these|the same|more|everything))?$")
 YESNO = re.compile(r"^(yes|yeah|yep|yup|y|no|nope|nah|n|maybe|not sure|idk|i don'?t know)$")
 # an action the assistant cannot perform: only used when the knowledge base has no answer for the message
 ACTION = re.compile(r"^(please )?(can|could|would|will) you |^(please )?(generate|create|make|write|draft|compose|translate|"
@@ -91,7 +93,8 @@ def _alpha(text: str) -> str:
     return re.sub(r"[^A-Za-zÀ-ɏͰ-῿぀-鿿가-힯]", "", text)
 
 
-def route(text: str, assistant: str, org: str, suggestions: list[str], docs: list[str]) -> tuple[str, str, bool] | None:
+def route(text: str, assistant: str, org: str, suggestions: list[str], docs: list[str],
+          menu=None) -> tuple[str, str, bool] | None:
     """Return (intent, answer, counts_as_answered) for messages the app can handle itself, else None."""
     raw = text.strip()
     t = _norm(raw)
@@ -121,14 +124,19 @@ def route(text: str, assistant: str, org: str, suggestions: list[str], docs: lis
     if ABUSE.search(t) and len(words) <= 8:
         return ("abuse", f"I'm sorry this has been frustrating. I'll do my best to help: ask me about "
                          f"{_topics(docs) or 'our policies'} and I'll point you to the exact page.{ask}", True)
+    if VAGUE.match(t) and menu:
+        return ("unclear", "Could you tell me what you'd like to know more about? I'm not sure yet what "
+                           "you're referring to. Here's what I can help with:\n" + menu(), False)
     if YESNO.match(t):
         return ("bare_reply", f"Could you tell me a little more about what you'd like to know?{ask}", True)
     return None
 
 
-def out_of_scope_message(text: str, assistant: str, org: str) -> str | None:
+def out_of_scope_message(text: str, assistant: str, org: str, menu: str = "") -> str | None:
     """For a message the knowledge base can't answer: if it is a request for an action, say so clearly."""
     if ACTION.search(_norm(text)):
         return (f"I can't do that. I'm {assistant}, and I can only answer questions from {org}'s documents "
-                f"(and show you the page I used). Try asking about a policy, a deadline or whether you qualify for something.")
+                f"(and show you the page I used)."
+                + (f" Here's what I can help with:\n{menu}" if menu
+                   else " Try asking about a policy, a deadline or whether you qualify for something."))
     return None

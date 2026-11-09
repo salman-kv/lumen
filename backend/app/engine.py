@@ -371,7 +371,8 @@ def _route(org_id: int, question: str):
     try:
         org = db.get(Organization, org_id)
         docs = [d.filename for d in db.query(Document).filter(Document.org_id == org_id, Document.status == "ready")]
-        return smalltalk.route(question, org.assistant_name, org.name, list(org.suggestions or []), docs)
+        return smalltalk.route(question, org.assistant_name, org.name, list(org.suggestions or []), docs,
+                               lambda: suggest.menu_text(org_id))
     finally:
         db.close()
 
@@ -406,7 +407,9 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
                                  ("combine", "Combine results", "app"), ("answer", "Write answer", "llm")):
             yield _ev(id=sid, label=label, kind=kind, status="skipped", ms=0, detail="not needed")
         yield {"type": "token", "text": chat}
-        yield {"type": "final", "data": _final(chat, "answered", [], intent, 1.0, None, steps, t0, False)}
+        more = (await asyncio.to_thread(_followups, org_id, typed, "no_knowledge", [], False)
+                if intent in ("unclear", "bare_reply", "language") else [])
+        yield {"type": "final", "data": _final(chat, "answered", [], intent, 1.0, None, steps, t0, False, more)}
         _log(org_id, typed, intent, "answered" if as_answered else "no_knowledge", False, t0, chat)
         return
 
@@ -430,11 +433,12 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
     choice = await asyncio.to_thread(choose_policy, question, ctx.rules) if has_rules else \
         {"benefit": None, "score": 0.0, "alternatives": []}
     if not hits or (best < settings.min_support and not choice["benefit"]):
-        msg = ("This assistant doesn't have any documents yet, so I can't answer questions." if ctx.ready_count == 0
-               else "I couldn't find anything about that in the organization's documents, so I won't guess. "
-                    "Please contact the organization directly for help.")
-        if ctx.ready_count:
-            msg = smalltalk.out_of_scope_message(question, ctx.assistant_name, ctx.org_name) or msg
+        if ctx.ready_count == 0:
+            msg = "This assistant doesn't have any documents yet, so I can't answer questions."
+        else:  # never a bare "couldn't find": say what was asked and what the documents do cover
+            menu = await asyncio.to_thread(suggest.menu_text, org_id)
+            msg = (smalltalk.out_of_scope_message(typed, ctx.assistant_name, ctx.org_name, menu)
+                   or suggest.not_found_message(menu, typed, hits, best, ctx.org_name))
         for sid, label, kind in (("choose", "Choose policy", "s1"), ("understand", "Extract facts", "llm"),
                                  ("decide", "Run decisions", "s1"), ("combine", "Combine results", "app"),
                                  ("answer", "Write answer", "llm")):
