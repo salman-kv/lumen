@@ -18,7 +18,7 @@ System 1 models and application logic**. The LLM only handles language.
 > **Free to run.** The default LLM is [Ollama](https://ollama.com) with `qwen2.5:3b` running locally. No account, no API key.
 
 ## Contents
-[Quick start](#quick-start) · [Architecture](#architecture) · [Knowledge base](#knowledge-base) · [AI architecture](#ai-architecture) · [Security](#security-and-multi-tenant-isolation) · [API](#major-api-endpoints) · [Tests and evaluation](#tests-and-evaluation) · [Limitations](#known-limitations-and-production-improvements) · [Requirements checklist](docs/REQUIREMENTS_CHECKLIST.md)
+[Quick start](#quick-start) · [Architecture](#architecture) · [Knowledge base](#knowledge-base) · [AI architecture](#ai-architecture) · [Security](#security-and-multi-tenant-isolation) · [API](#major-api-endpoints) · [Tests and evaluation](#tests-and-evaluation) · [Limitations](#known-limitations-and-production-improvements) · [Requirements checklist](docs/REQUIREMENTS_CHECKLIST.md) · [Full documentation (A to Z)](docs/DOCUMENTATION.md)
 
 ---
 
