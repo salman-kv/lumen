@@ -100,11 +100,19 @@ class QuestionLog(Base):
     outcome: Mapped[str] = mapped_column(String(20))  # answered|needs_info|no_knowledge|error
     used_decisions: Mapped[bool] = mapped_column(Boolean, default=False)
     latency_ms: Mapped[float] = mapped_column(Float, default=0)
+    answer: Mapped[str] = mapped_column(Text, default="")
+    sources: Mapped[str] = mapped_column(String(400), default="")  # e.g. "Fee_Policy.pdf p.2, Leave_Policy.pdf p.1"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 def init_db():
     Base.metadata.create_all(engine)
+    # existing databases (created before answers were kept) get the new columns
+    with engine.begin() as c:
+        have = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(question_logs)")} if engine.dialect.name == "sqlite" else None
+        for col, ddl in (("answer", "TEXT DEFAULT ''"), ("sources", "VARCHAR(400) DEFAULT ''")):
+            if have is not None and col not in have:
+                c.exec_driver_sql(f"ALTER TABLE question_logs ADD COLUMN {col} {ddl}")
 
 
 def get_db():

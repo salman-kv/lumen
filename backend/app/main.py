@@ -266,6 +266,54 @@ def usage(org: Organization = Depends(current_org), db: Session = Depends(get_db
                        for r in q.order_by(QuestionLog.id.desc()).limit(8)]}
 
 
+def _utc_iso(dt: datetime) -> str:
+    """SQLite returns naive datetimes; they are UTC, so say so, or the browser shows them in the wrong time zone."""
+    return (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt).isoformat()
+
+
+def _history_query(db: Session, org: Organization, q: str, outcome: str):
+    rows = db.query(QuestionLog).filter(QuestionLog.org_id == org.id)
+    if outcome == "answered":
+        rows = rows.filter(QuestionLog.outcome == "answered")
+    elif outcome in ("needs_info", "no_knowledge", "error"):
+        rows = rows.filter(QuestionLog.outcome == outcome)
+    if q.strip():
+        like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = rows.filter(QuestionLog.question.ilike(like, escape="\\") | QuestionLog.answer.ilike(like, escape="\\"))
+    return rows
+
+
+@app.get("/api/usage/history")
+def usage_history(page: int = 1, per_page: int = 15, q: str = "", outcome: str = "all",
+                  org: Organization = Depends(current_org), db: Session = Depends(get_db)):
+    """Every question visitors have asked (newest first), searchable and filterable, with the answer given."""
+    per_page = min(max(per_page, 1), 50)
+    rows = _history_query(db, org, q[:200], outcome)
+    total = rows.count()
+    pages = max(1, -(-total // per_page))
+    page = min(max(page, 1), pages)
+    items = rows.order_by(QuestionLog.id.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return {"total": total, "page": page, "pages": pages, "per_page": per_page,
+            "items": [{"id": r.id, "question": r.question, "answer": r.answer or "", "sources": r.sources or "",
+                       "outcome": r.outcome, "type": r.qtype, "decisions": r.used_decisions,
+                       "latency_ms": round(r.latency_ms or 0), "at": _utc_iso(r.created_at)} for r in items]}
+
+
+@app.get("/api/usage/history.csv")
+def usage_history_csv(q: str = "", outcome: str = "all", org: Organization = Depends(current_org),
+                      db: Session = Depends(get_db)):
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["time (UTC)", "question", "outcome", "answer", "sources", "type", "seconds"])
+    for r in _history_query(db, org, q[:200], outcome).order_by(QuestionLog.id.desc()).limit(5000):
+        w.writerow([r.created_at.strftime("%Y-%m-%d %H:%M:%S"), r.question, r.outcome, r.answer or "", r.sources or "",
+                    r.qtype, round((r.latency_ms or 0) / 1000, 1)])
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="question-history.csv"'})
+
+
 # ------------------------------------------------------------------ public assistant
 
 class Turn(BaseModel):
@@ -339,7 +387,7 @@ async def ask(body: AskIn, request: Request, db: Session = Depends(get_db)):
     db.close()
     rate_limit(f"{body.token}:{request.client.host if request.client else ''}")
     final = None
-    async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question))):
+    async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question)), body.question.strip()):
         if ev["type"] == "final":
             final = ev["data"]
     return final
@@ -355,7 +403,7 @@ async def ask_stream(body: AskIn, request: Request, db: Session = Depends(get_db
 
     async def gen():
         try:
-            async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question))):
+            async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question)), body.question.strip()):
                 yield f"data: {json.dumps(ev, default=str)}\n\n"
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Something went wrong while answering. Please try again.'})}\n\n"

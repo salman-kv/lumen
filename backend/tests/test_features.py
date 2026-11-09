@@ -399,3 +399,67 @@ def test_year_written_as_a_word_is_understood(client, org_a):
     _, tok = org_a
     d = ask(client, tok, "I am in year one with gpa 3.9 and no sports scholarship, can I get merit scholarship?")
     assert d["decisions"]["verdict"] == "not_eligible"
+
+
+# ---- full question history -----------------------------------------------------------------------------------
+
+def test_history_keeps_every_question_with_its_answer(client, org_a):
+    h, tok = org_a
+    ask(client, tok, "What is the refund policy?")
+    ask(client, tok, "What is the capital of Mars?")
+    d = client.get("/api/usage/history?per_page=50", headers=h).json()
+    by_q = {i["question"]: i for i in d["items"]}
+    assert d["total"] >= 2 and d["items"][0]["question"] == "What is the capital of Mars?"  # newest first
+    assert by_q["What is the refund policy?"]["answer"].strip()
+    assert "Fee_Policy.pdf" in by_q["What is the refund policy?"]["sources"]
+    assert by_q["What is the capital of Mars?"]["outcome"] == "no_knowledge"
+
+
+def test_history_logs_what_the_visitor_typed_not_the_added_context(client, org_a):
+    h, tok = org_a
+    client.post("/api/ask", json={"token": tok, "question": "tell me more details", "context": "What is the refund policy?"})
+    assert client.get("/api/usage/history?per_page=1", headers=h).json()["items"][0]["question"] == "tell me more details"
+
+
+def test_history_search_filter_and_paging(client, org_a):
+    h, tok = org_a
+    for i in range(3):
+        ask(client, tok, f"What is the refund policy? case {i}")
+    s = client.get("/api/usage/history?q=refund", headers=h).json()
+    assert s["total"] >= 3 and all("refund" in (i["question"] + i["answer"]).lower() for i in s["items"])
+    assert client.get("/api/usage/history?q=zzzqqq", headers=h).json()["total"] == 0
+    assert client.get("/api/usage/history?q=r%25d", headers=h).json()["total"] == 0  # '%' is literal, not a wildcard
+    nk = client.get("/api/usage/history?outcome=no_knowledge", headers=h).json()
+    assert nk["total"] >= 1 and all(i["outcome"] == "no_knowledge" for i in nk["items"])
+    p1 = client.get("/api/usage/history?per_page=2&page=1", headers=h).json()
+    p2 = client.get("/api/usage/history?per_page=2&page=2", headers=h).json()
+    assert len(p1["items"]) == 2 and p1["pages"] >= 2
+    assert {i["id"] for i in p1["items"]}.isdisjoint({i["id"] for i in p2["items"]})
+    assert client.get("/api/usage/history?page=9999&per_page=2", headers=h).json()["page"] == p1["pages"]
+
+
+def test_history_is_private_to_the_organization(client, org_a, org_b):
+    ha, _ = org_a
+    hb, tb = org_b
+    ask(client, tb, "Can I work remotely?")
+    mine = client.get("/api/usage/history?per_page=50&q=remotely", headers=ha).json()
+    assert mine["total"] == 0
+    assert client.get("/api/usage/history?q=remotely", headers=hb).json()["total"] >= 1
+    assert client.get("/api/usage/history").status_code == 401  # needs the admin login
+
+
+def test_history_csv_export(client, org_a):
+    h, tok = org_a
+    ask(client, tok, "What is the refund policy?")
+    r = client.get("/api/usage/history.csv", headers=h)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert r.text.splitlines()[0].startswith("time (UTC),question,outcome,answer")
+    assert "refund" in r.text.lower()
+    assert client.get("/api/usage/history.csv").status_code == 401
+
+
+def test_history_times_are_marked_utc(client, org_a):
+    h, tok = org_a
+    ask(client, tok, "What is the refund policy?")
+    at = client.get("/api/usage/history?per_page=1", headers=h).json()["items"][0]["at"]
+    assert at.endswith("+00:00") or at.endswith("Z")

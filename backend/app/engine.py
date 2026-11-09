@@ -380,7 +380,9 @@ def _ev(**kw):
     return {"type": "step", **kw}
 
 
-async def run(org_id: int, question: str, history: list[dict] | None = None, detail: bool = False) -> AsyncIterator[dict]:
+async def run(org_id: int, question: str, history: list[dict] | None = None, detail: bool = False,
+              asked: str | None = None) -> AsyncIterator[dict]:
+    typed = asked or question  # what the visitor typed (the engine may have prefixed an earlier question)
     t0 = time.perf_counter()
     steps: list[dict] = []
 
@@ -405,7 +407,7 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
             yield _ev(id=sid, label=label, kind=kind, status="skipped", ms=0, detail="not needed")
         yield {"type": "token", "text": chat}
         yield {"type": "final", "data": _final(chat, "answered", [], intent, 1.0, None, steps, t0, False)}
-        _log(org_id, question, intent, "answered" if as_answered else "no_knowledge", False, t0)
+        _log(org_id, typed, intent, "answered" if as_answered else "no_knowledge", False, t0, chat)
         return
 
     # 1. Retrieval (tenant-scoped) -------------------------------------------------
@@ -440,7 +442,7 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
         yield {"type": "token", "text": msg}
         more = await asyncio.to_thread(_followups, org_id, question, "no_knowledge", [], detail)
         yield {"type": "final", "data": _final(msg, "no_knowledge", [], qtype, conf, None, steps, t0, False, more)}
-        _log(org_id, question, qtype, "no_knowledge", False, t0)
+        _log(org_id, typed, qtype, "no_knowledge", False, t0, msg)
         return
 
     # 3. Decide whether structured decisions are needed (application logic) -------
@@ -498,7 +500,7 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
             msg = "Sorry, I had trouble evaluating the policy conditions. Please try again."
             yield {"type": "token", "text": msg}
             yield {"type": "final", "data": _final(msg, "error", [], qtype, conf, None, steps, t0, False)}
-            _log(org_id, question, qtype, "error", True, t0)
+            _log(org_id, typed, qtype, "error", True, t0, msg)
             return
         passed = sum(r["result"] == "pass" for r in results)
         yield done("decide", "Run decisions", "s1", t,
@@ -581,7 +583,7 @@ async def run(org_id: int, question: str, history: list[dict] | None = None, det
     more = await asyncio.to_thread(_followups, org_id, question, status, refs, detail)
     yield {"type": "final", "data": _final(answer.strip(), status, refs, qtype, conf, decisions, steps, t0,
                                            degraded or not llm_ok, more)}
-    _log(org_id, question, qtype, status, use_decisions, t0)
+    _log(org_id, typed, qtype, status, use_decisions, t0, answer.strip(), refs)
 
 
 def _followups(org_id: int, question: str, status: str, refs: list[dict], detail: bool) -> list[str]:
@@ -594,17 +596,18 @@ def _followups(org_id: int, question: str, status: str, refs: list[dict], detail
 
 
 def _final(answer, status, refs, qtype, conf, decisions, steps, t0, degraded, followups=None):
-    return {"followups": followups or [],
-"answer": answer, "status": status, "references": refs,
+    return {"followups": followups or [], "answer": answer, "status": status, "references": refs,
             "question_type": {"label": qtype, "confidence": round(conf, 3)}, "decisions": decisions,
             "steps": steps, "degraded": degraded, "latency_ms": round((time.perf_counter() - t0) * 1000)}
 
 
-def _log(org_id, question, qtype, outcome, used, t0):
+def _log(org_id, question, qtype, outcome, used, t0, answer="", refs=None):
+    sources = ", ".join(dict.fromkeys(f"{r['document']} p.{r['page']}" for r in (refs or [])))[:400]
     db = SessionLocal()
     try:
         db.add(QuestionLog(org_id=org_id, question=question[:1000], qtype=qtype, outcome=outcome,
-                           used_decisions=used, latency_ms=round((time.perf_counter() - t0) * 1000)))
+                           used_decisions=used, latency_ms=round((time.perf_counter() - t0) * 1000),
+                           answer=answer[:3000], sources=sources))
         db.commit()
     finally:
         db.close()
