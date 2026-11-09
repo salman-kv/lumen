@@ -81,7 +81,7 @@ Limits (10 PDFs, 20 pages, 10 MB) are `MAX_DOCS`, `MAX_PAGES`, `MAX_PDF_MB`.
 
 ### Run the tests
 ```bash
-cd backend && uv run pytest -q      # 74 tests, offline, no model needed
+cd backend && uv run pytest -q      # 81 tests, offline, no model needed
 ```
 
 ---
@@ -218,7 +218,7 @@ Interactive docs: `/docs`.
 ## Tests and evaluation
 
 - **Scenario battery**: `cd backend && uv run python ../scripts/scenario_battery.py` runs 44 extra questions (boundary values, typos, caps, off-topic, cross-tenant, long input) against the running app.
-- **Unit and API tests**: `cd backend && uv run pytest -q` (74 passing; offline).
+- **Unit and API tests**: `cd backend && uv run pytest -q` (81 passing; offline).
 - **End-to-end evaluation** with the real models: `uv run python ../scripts/seed_and_eval.py` runs `sample_data/test_questions.json` (19 questions, 2 organizations, 6 PDFs) and checks status, verdict and cited document for each.
 
 | Coverage | Questions |
@@ -257,7 +257,7 @@ The repo is ready to deploy as a Docker Space (README header, port 8000, models 
 2. On [huggingface.co](https://huggingface.co) create a **Space**: SDK **Docker**, **Public**.
 3. In the Space, **Settings → Variables and secrets**:
    - Secrets: `JWT_SECRET` (long random string), `OPENAI_API_KEY` (the Groq key)
-   - Variables: `LLM_PROVIDER=openai_compat`, `OPENAI_BASE_URL=https://api.groq.com/openai/v1`, `OPENAI_MODEL=llama-3.3-70b-versatile`, `PUBLIC_URL=https://<user>-<space>.hf.space`
+   - Variables: `LLM_PROVIDER=openai_compat`, `OPENAI_BASE_URL=https://api.groq.com/openai/v1`, `OPENAI_MODEL=qwen/qwen3.8-27b`, `PUBLIC_URL=https://<user>-<space>.hf.space`
 4. Push this repo to the Space: `git push https://huggingface.co/spaces/<user>/<space> main` (the Space remote asks for your HF username and an access token with write permission).
 
 The login page then shows buttons for the two demo organizations (`SEED_DEMO=true`). Free Spaces have no persistent disk, so data resets on restart, and the demo organizations are recreated automatically. A sleeping Space needs about a minute to wake.

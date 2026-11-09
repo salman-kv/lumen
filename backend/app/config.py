@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:3b"
     openai_base_url: str = "https://api.groq.com/openai/v1"
     openai_api_key: str = ""
-    openai_model: str = "llama-3.3-70b-versatile"
+    openai_model: str = "qwen/qwen3.8-27b"
     llm_timeout: float = 120.0
     rules_llm: bool = False  # opt-in: enable with a strong model (e.g. Groq 70B); small local models over-generate
     rules_llm_max_pages: int = 6

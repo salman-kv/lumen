@@ -346,3 +346,56 @@ def test_amount_tier_survives_pdf_line_wraps():
     from app.engine import amount_tier
     wrapped = EXPENSE.replace("Finance Committee", "Finance\nCommittee")
     assert amount_tier("Who approves a $7,000 expense?", [_hit(wrapped)])["approver"] == "Finance Committee"
+
+
+# ---- starter questions, follow-up chips, conversation history ---------------------------------------------
+
+def test_public_assistant_lists_generated_starter_questions(client, org_a):
+    _, tok = org_a
+    s = client.get(f"/api/public/assistant/{tok}").json()["suggestions"]
+    assert 3 <= len(s) <= 6 and len(set(s)) == len(s)
+    assert any("Merit Scholarship" in q for q in s)  # built from the rule cards, not typed by the owner
+
+
+def test_owner_suggestions_come_first_and_up_to_six_are_kept(client, org_a):
+    h, tok = org_a
+    mine = [f"Custom question {i}?" for i in range(8)]
+    r = client.patch("/api/assistant", headers=h, json={"suggestions": mine})
+    assert r.json()["suggestions"] == mine[:6]
+    assert client.get(f"/api/public/assistant/{tok}").json()["suggestions"] == mine[:6]
+    client.patch("/api/assistant", headers=h, json={"suggestions": []})
+
+
+def test_answer_offers_follow_up_chips(client, org_a):
+    _, tok = org_a
+    f = ask(client, tok, "What is the refund policy?")["followups"]
+    assert f[0] == "Tell me more details" and 1 <= len(f) <= 3
+
+
+def test_needs_info_has_no_chips_and_no_knowledge_offers_starters(client, org_a):
+    _, tok = org_a
+    assert ask(client, tok, "Am I eligible for the Merit Scholarship?")["followups"] == []
+    assert ask(client, tok, "What is the capital of Mars?")["followups"]
+
+
+def test_detail_request_and_history_are_accepted(client, org_a):
+    _, tok = org_a
+    r = client.post("/api/ask", json={
+        "token": tok, "question": "tell me more details", "context": "What is the refund policy?",
+        "history": [{"q": "What is the refund policy?", "a": "Refunds are given within 14 days."}]})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["status"] == "answered" and d["references"]
+    assert "Tell me more details" not in d["followups"]  # already asked for detail
+
+
+def test_history_is_validated(client, org_a):
+    _, tok = org_a
+    r = client.post("/api/ask", json={"token": tok, "question": "hello", "history": [{"q": "x" * 1001, "a": "y"}]})
+    assert r.status_code == 422
+
+
+def test_year_written_as_a_word_is_understood(client, org_a):
+    _, tok = org_a
+    d = ask(client, tok, "I am in year one with gpa 3.9 and no sports scholarship, can I get merit scholarship?")
+    assert d["decisions"]["verdict"] == "not_eligible"

@@ -78,3 +78,11 @@ Honest notes for the reviewers:
 | Deployed app | Not done | optional |
 | GitHub repository | Yours | repo is committed locally; add a remote and push |
 | **Demo video, 8 to 15 min** | **Yours** | script in `docs/DEMO_SCRIPT.md`; mandatory, needs your voice |
+
+## Conversation improvements (added after review)
+| Feature | Where |
+|---|---|
+| Starter questions: the owner's own (up to 6) plus ones generated from the documents, shown before the visitor types | `suggest.py`, `/api/public/assistant/{token}`, `ChatPanel.jsx` |
+| Follow-up chips under every answer ("Tell me more details", related questions); none while the assistant waits for the visitor's facts | `suggest.followups`, `final.followups` |
+| Conversation history (last 4 turns) is sent with each question, so "what if I withdraw in week 3?" is understood from the earlier answer; history is context only, never a source of facts | `AskIn.history`, `engine._history_block` |
+| "Tell me more / explain / give an example" retrieves more passages and asks for a fuller, still fully grounded answer | `DETAIL_SYSTEM`, `main.DETAIL` |

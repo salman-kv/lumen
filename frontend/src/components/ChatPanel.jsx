@@ -141,11 +141,17 @@ export default function ChatPanel({ token, embedded = false, className = "", pre
     // Answering a "more information needed" reply: send the earlier question along so the new facts combine with it.
     const prevBot = msgs[msgs.length - 1]
     // Short follow-ups ("what about the sports one?", "and for third year?", "tell me more") also carry the earlier question.
-    const FOLLOW_UP = /^(and|also|what about|how about|what if|then|so|but|why|how so|what else|more|tell me more|explain|and if|for)\b|\b(it|that|this|they|those|them|its|the same|there)\b/i
+    const FOLLOW_UP = /^(and|also|what about|how about|what if|then|so|but|why|how so|what else|more|tell me more|explain|and if|for)\b|\b(it|that|this|they|those|them|its|the same|there|details?|elaborate|example|expand|clarify|step by step)\b/i
     const prevQuestion = msgs[msgs.length - 2]?.text || ''
     const prevWasReal = prevBot?.final && !['small_talk', 'blocked', 'unclear', 'language', 'human', 'abuse', 'bare_reply'].includes(prevBot.final.question_type?.label) && prevBot.final.status !== 'no_knowledge'
     const followUp = prevWasReal && question.split(/\s+/).length <= 9 && FOLLOW_UP.test(question)
     const context = prevBot?.final?.status === 'needs_info' || followUp ? prevQuestion : ''
+    // Recent turns (question + short answer) so "why?" or "give an example" are understood in context.
+    const history = []
+    for (let i = 0; i + 1 < msgs.length; i += 2) {
+      const a = msgs[i + 1]?.final?.answer
+      if (msgs[i].role === 'user' && a) history.push({ q: msgs[i].text, a: a.slice(0, 600) })
+    }
     lastQ.current = question
     setInput(''); setBusy(true)
     setMsgs((ms) => [...ms, { role: 'user', text: question }, { role: 'bot', text: '', steps: [], pending: true }])
@@ -161,7 +167,7 @@ export default function ChatPanel({ token, embedded = false, className = "", pre
         else if (ev.type === 'replace') patchLast((m) => ({ ...m, text: ev.text }))
         else if (ev.type === 'final') patchLast((m) => ({ ...m, pending: false, final: ev.data, text: m.text || ev.data.answer }))
         else if (ev.type === 'error') patchLast((m) => ({ ...m, pending: false, error: true, text: ev.message }))
-      }, abortRef.current.signal, context)
+      }, abortRef.current.signal, context, history.slice(-4))
       patchLast((m) => (m.pending ? { ...m, pending: false, error: true, text: m.text || 'The answer was interrupted. Please try again.' } : m))
     } catch (e) {
       patchLast((m) => ({ ...m, pending: false, error: true, text: e.message }))
@@ -206,6 +212,7 @@ export default function ChatPanel({ token, embedded = false, className = "", pre
         </motion.div>
         {msgs.length === 0 && cfg.suggestions?.length > 0 && (
           <div className="flex flex-wrap gap-2 pt-1">
+            <p className="w-full text-xs font-medium text-muted">Not sure what to ask? Try one of these:</p>
             {cfg.suggestions.map((s, i) => (
               <motion.button key={s} initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + i * 0.08 }}
                 onClick={() => send(s)} className="rounded-xl border border-line bg-surface px-3 py-2 text-left text-[13px] font-medium transition-colors hover:border-[color:var(--brand)] hover:bg-surface-2">
@@ -220,6 +227,16 @@ export default function ChatPanel({ token, embedded = false, className = "", pre
         ) : (
           <motion.div key={i} initial={reduce ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             <BotMessage m={m} onRetry={!busy && i === msgs.length - 1 && m.error ? () => { setMsgs((x) => x.slice(0, -2)); send(lastQ.current) } : null} />
+            {!busy && i === msgs.length - 1 && m.final?.followups?.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {m.final.followups.map((f) => (
+                  <button key={f} onClick={() => send(f)}
+                    className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] font-medium transition-colors hover:border-[color:var(--brand)] hover:bg-surface-2">
+                    {f}
+                  </button>
+                ))}
+              </div>
+            )}
           </motion.div>
         ))}
         <div ref={endRef} />

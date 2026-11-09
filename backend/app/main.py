@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import classifier, demo_seed, engine, llm, models_s1
+from . import classifier, demo_seed, engine, llm, models_s1, suggest
 from .config import BASE_DIR, settings
 from .db import Chunk, Document, Organization, QuestionLog, Rule, get_db, init_db, new_token
 from .ingest import process_document
@@ -231,7 +231,7 @@ def update_assistant(body: AssistantIn, request: Request, org: Organization = De
     if body.welcome_message is not None:
         org.welcome_message = body.welcome_message.strip()
     if body.suggestions is not None:
-        org.suggestions = [s.strip()[:140] for s in body.suggestions if s.strip()][:4]
+        org.suggestions = [s.strip()[:140] for s in body.suggestions if s.strip()][:suggest.MAX_SUGGESTIONS]
     db.merge(org)
     db.commit()
     return assistant_out(org, request)
@@ -268,16 +268,37 @@ def usage(org: Organization = Depends(current_org), db: Session = Depends(get_db
 
 # ------------------------------------------------------------------ public assistant
 
+class Turn(BaseModel):
+    q: str = Field(max_length=1000)
+    a: str = Field(max_length=2000)
+
+
 class AskIn(BaseModel):
     token: str
     question: str
     context: str = ""  # earlier question, when the user is answering a "more information needed" reply
+    history: list[Turn] = Field(default_factory=list, max_length=6)  # recent turns, so follow-ups make sense
+
+
+DETAIL = re.compile(r"\b(more|details?|detailed|elaborate|explain|in depth|step by step|expand|everything|full|example)\b", re.I)
+
+
+FILLER = re.compile(r"\b(tell me|more|details?|detailed|elaborate|explain|in depth|step by step|expand|everything|full|"
+                    r"please|can you|could you|give me|an? examples?|examples?|about (it|that|this)|on (it|that|this))\b", re.I)
+
+
+def _history(body: AskIn) -> list[dict]:
+    return [t.model_dump() for t in body.history[-4:]]
 
 
 def _with_context(body: AskIn) -> str:
     q = _clean_question(body.question)
     prev = (body.context or "").strip()[:1000]
-    return f"{prev} {q}" if prev else q
+    if not prev:
+        return q
+    # "tell me more details" adds only filler words to the search, which would dilute the earlier question
+    rest = re.sub(r"\s+", " ", FILLER.sub(" ", q)).strip(" ,.?!")
+    return f"{prev} {rest}" if rest else prev
 
 
 def _org_by_token(db: Session, token: str) -> Organization:
@@ -307,7 +328,7 @@ def public_demo():
 def public_assistant(token: str, db: Session = Depends(get_db)):
     org = _org_by_token(db, token)
     return {"name": org.assistant_name, "org": org.name, "color": org.brand_color, "welcome": org.welcome_message,
-            "suggestions": org.suggestions or []}
+            "suggestions": suggest.all_suggestions(org.id, list(org.suggestions or []))}
 
 
 @app.post("/api/ask")
@@ -318,7 +339,7 @@ async def ask(body: AskIn, request: Request, db: Session = Depends(get_db)):
     db.close()
     rate_limit(f"{body.token}:{request.client.host if request.client else ''}")
     final = None
-    async for ev in engine.run(org_id, question):
+    async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question))):
         if ev["type"] == "final":
             final = ev["data"]
     return final
@@ -334,7 +355,7 @@ async def ask_stream(body: AskIn, request: Request, db: Session = Depends(get_db
 
     async def gen():
         try:
-            async for ev in engine.run(org_id, question):
+            async for ev in engine.run(org_id, question, _history(body), bool(DETAIL.search(body.question))):
                 yield f"data: {json.dumps(ev, default=str)}\n\n"
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Something went wrong while answering. Please try again.'})}\n\n"

@@ -34,7 +34,7 @@ export default function Assistant() {
   const nav = useNavigate()
 
   useEffect(() => {
-    if (assistant && !form) setForm({ assistant_name: assistant.assistant_name, brand_color: assistant.brand_color, welcome_message: assistant.welcome_message, suggestions: [...assistant.suggestions, '', '', '', ''].slice(0, 3) })
+    if (assistant && !form) setForm({ assistant_name: assistant.assistant_name, brand_color: assistant.brand_color, welcome_message: assistant.welcome_message, suggestions: [...assistant.suggestions, '', '', '', '', '', ''].slice(0, 6) })
   }, [assistant]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => loadUsage(), [loadUsage])
 
@@ -110,7 +110,7 @@ export default function Assistant() {
             </div>
             <div className="mt-4"><label className="label" htmlFor="welcome">Welcome message</label><textarea id="welcome" rows={2} maxLength={300} className="input resize-none" value={form.welcome_message} onChange={set('welcome_message')} /></div>
             <div className="mt-4">
-              <p className="label">Suggested questions <span className="font-normal text-muted">(optional, up to 3)</span></p>
+              <p className="label">Suggested questions <span className="font-normal text-muted">(optional, up to 6; more are added automatically from your documents)</span></p>
               <div className="space-y-2">
                 {form.suggestions.map((s, i) => (
                   <input key={i} aria-label={`Suggested question ${i + 1}`} className="input" maxLength={140} value={s} placeholder={['Am I eligible for...?', 'How do I apply?', 'What is the policy on...?'][i]}

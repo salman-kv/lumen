@@ -14,7 +14,7 @@ from typing import AsyncIterator
 
 import numpy as np
 
-from . import classifier, llm, models_s1, rules, smalltalk
+from . import classifier, llm, models_s1, rules, smalltalk, suggest
 from .config import settings
 from .db import Document, Organization, QuestionLog, Rule, SessionLocal
 from .retrieval import Hit, retrieve
@@ -57,7 +57,7 @@ class Context:
     ready_count: int
 
 
-def load_context(org_id: int, question: str) -> Context:
+def load_context(org_id: int, question: str, top_k: int | None = None) -> Context:
     db = SessionLocal()
     try:
         org = db.get(Organization, org_id)
@@ -67,7 +67,7 @@ def load_context(org_id: int, question: str) -> Context:
         rs = [RuleView(r.id, r.doc_id, names.get(r.doc_id, "?"), r.page, r.benefit, r.field, r.label, r.operator,
                        r.value, r.evidence)
               for r in db.query(Rule).filter(Rule.org_id == org_id).all()]
-        hits = retrieve(db, org_id, question) if ready else []
+        hits = retrieve(db, org_id, question, top_k) if ready else []
         return Context(org.name, org.assistant_name, hits, rs, len(docs), len(ready))
     finally:
         db.close()
@@ -116,6 +116,10 @@ def pattern_facts(question: str, fields: dict[str, str]) -> dict:
             facts["year"] = ORD[m.group(1)]
         elif m2:
             facts["year"] = int(m2.group(1) or m2.group(2))
+        else:  # "year one", "year two", "in year three"
+            m3 = re.search(r"\byear\s+(one|two|three|four|five)\b", low)
+            if m3:
+                facts["year"] = NUMBER_WORDS[m3.group(1)]
     if "tenure_months" in fields:
         m = re.search(r"(\d+)\s*(months?|years?)(?!\s*(?:of study|old))", low)
         if m:
@@ -251,6 +255,17 @@ ANSWER_SYSTEM = (
     "Mention source documents like (Doc.pdf, p.4). If the context does not contain the answer, say you could not find it."
 )
 
+DETAIL_SYSTEM = (
+    "You are {assistant}, the assistant of {org}. Answer ONLY from the provided context. The user wants more detail: "
+    "restate the rule fully and clearly (up to 120 words), listing every condition, amount, deadline, exception and "
+    "step that the context states, whichever apply. Every sentence must be supported by the context: do not add "
+    "general advice, assumptions or remarks. If the context is short, the answer is short; never pad. Plain text; steps "
+    "may go on separate lines numbered 1., 2. End with the source, like (Doc.pdf, p.4)."
+)
+
+HISTORY_NOTE = (" Earlier messages are shown only so you understand what the question refers to; never use them as a "
+                "source of facts.")
+
 DECISION_SYSTEM = (
     "You are {assistant}, the assistant of {org}. A policy check has already been run and its result is final. "
     "Write a short, friendly reply (under 80 words, plain text, no lists): begin with the result, then explain it "
@@ -324,8 +339,13 @@ def fallback_answer(question: str, hits: list[Hit], verdict: str | None, results
     return _best_sentence(question, hits) or "I found related passages but could not summarise them."
 
 
-def _context_block(hits: list[Hit]) -> str:
-    return "\n\n".join(f"[{i}] {h.document}, page {h.page}:\n{h.text}" for i, h in enumerate(hits[:4], 1))
+def _context_block(hits: list[Hit], n: int = 4) -> str:
+    return "\n\n".join(f"[{i}] {h.document}, page {h.page}:\n{h.text}" for i, h in enumerate(hits[:n], 1))
+
+
+def _history_block(history: list[dict] | None) -> str:
+    turns = [f"User: {t['q'][:300]}\nAssistant: {t['a'][:300]}" for t in (history or [])[-3:] if t.get("q") and t.get("a")]
+    return "Earlier in this conversation:\n" + "\n".join(turns) + "\n\n" if turns else ""
 
 
 def build_references(hits: list[Hit], results: list[dict], best: float) -> list[dict]:
@@ -360,7 +380,7 @@ def _ev(**kw):
     return {"type": "step", **kw}
 
 
-async def run(org_id: int, question: str) -> AsyncIterator[dict]:
+async def run(org_id: int, question: str, history: list[dict] | None = None, detail: bool = False) -> AsyncIterator[dict]:
     t0 = time.perf_counter()
     steps: list[dict] = []
 
@@ -391,7 +411,7 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
     # 1. Retrieval (tenant-scoped) -------------------------------------------------
     yield running("retrieve", "Search knowledge base", "s1")
     t = time.perf_counter()
-    ctx = await asyncio.to_thread(load_context, org_id, question)
+    ctx = await asyncio.to_thread(load_context, org_id, question, settings.top_k + 3 if detail else None)
     hits = ctx.hits
     best = hits[0].score if hits else 0.0
     yield done("retrieve", "Search knowledge base", "s1", t,
@@ -418,7 +438,8 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
                                  ("answer", "Write answer", "llm")):
             yield _ev(id=sid, label=label, kind=kind, status="skipped", ms=0, detail="skipped")
         yield {"type": "token", "text": msg}
-        yield {"type": "final", "data": _final(msg, "no_knowledge", [], qtype, conf, None, steps, t0, False)}
+        more = await asyncio.to_thread(_followups, org_id, question, "no_knowledge", [], detail)
+        yield {"type": "final", "data": _final(msg, "no_knowledge", [], qtype, conf, None, steps, t0, False, more)}
         _log(org_id, question, qtype, "no_knowledge", False, t0)
         return
 
@@ -526,8 +547,12 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
         refs.insert(0, {"document": tier["document"], "page": tier["page"], "snippet": tier["evidence"][:300],
                         "score": None, "kind": "rule"})
         refs = [refs[0]] + [r for r in refs[1:] if (r["document"], r["page"]) != (tier["document"], tier["page"])]
-    user_prompt = f"Question: {question}\n\n{decision_text}\n\nContext:\n{_context_block(hits)}\n\nAnswer:"
-    system = (DECISION_SYSTEM if verdict else ANSWER_SYSTEM).format(assistant=ctx.assistant_name, org=ctx.org_name)
+    hist = _history_block(history)
+    wide = detail and not verdict and not tier
+    user_prompt = (f"{hist}Question: {question}\n\n{decision_text}\n\n"
+                   f"Context:\n{_context_block(hits, 7 if wide else 4)}\n\nAnswer:")
+    system = (DECISION_SYSTEM if verdict else DETAIL_SYSTEM if wide else ANSWER_SYSTEM).format(
+        assistant=ctx.assistant_name, org=ctx.org_name) + (HISTORY_NOTE if hist else "")
     answer, degraded = "", False
     try:
         async for tok in llm.stream_text(system, user_prompt, fallback):
@@ -553,13 +578,24 @@ async def run(org_id: int, question: str) -> AsyncIterator[dict]:
                (f"{settings.llm_provider}, corrected to match the decision" if corrected else f"{settings.llm_provider}"),
                "error" if degraded else "done")
     status = "needs_info" if verdict == "need_info" else "answered"
+    more = await asyncio.to_thread(_followups, org_id, question, status, refs, detail)
     yield {"type": "final", "data": _final(answer.strip(), status, refs, qtype, conf, decisions, steps, t0,
-                                           degraded or not llm_ok)}
+                                           degraded or not llm_ok, more)}
     _log(org_id, question, qtype, status, use_decisions, t0)
 
 
-def _final(answer, status, refs, qtype, conf, decisions, steps, t0, degraded):
-    return {"answer": answer, "status": status, "references": refs,
+def _followups(org_id: int, question: str, status: str, refs: list[dict], detail: bool) -> list[str]:
+    db = SessionLocal()
+    try:
+        custom = list(db.get(Organization, org_id).suggestions or [])
+    finally:
+        db.close()
+    return suggest.followups(org_id, question, status, refs, custom, detail)
+
+
+def _final(answer, status, refs, qtype, conf, decisions, steps, t0, degraded, followups=None):
+    return {"followups": followups or [],
+"answer": answer, "status": status, "references": refs,
             "question_type": {"label": qtype, "confidence": round(conf, 3)}, "decisions": decisions,
             "steps": steps, "degraded": degraded, "latency_ms": round((time.perf_counter() - t0) * 1000)}
 
