@@ -883,3 +883,7 @@ docker compose down                                       :: stop
 git status
 git add -A && git commit -m "message" && git push
 ```
+
+---
+
+*This document is also available as a PDF: `docs/Lumen_Documentation.pdf`. After editing this file, regenerate it with `cd backend && uv run python ../scripts/build_docs_pdf.py`.*
