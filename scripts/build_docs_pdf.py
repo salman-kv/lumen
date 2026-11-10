@@ -1,6 +1,7 @@
-"""Builds docs/Lumen_Documentation.pdf from docs/DOCUMENTATION.md.
+"""Builds a PDF from a markdown file in docs/ (default: docs/DOCUMENTATION.md -> docs/Lumen_Documentation.pdf).
 
   cd backend && uv run python ../scripts/build_docs_pdf.py
+  cd backend && uv run python ../scripts/build_docs_pdf.py ../docs/INTERVIEW_GUIDE.md ../docs/Lumen_Interview_Guide.pdf         "Interview study guide" "Understand Lumen and answer any question"
 
 Needs reportlab (already a backend dependency). Uses Segoe UI and Consolas from C:\\Windows\\Fonts; on other systems
 point FONT_DIR at a folder with any TTF family that has arrows and box-drawing characters (for example DejaVu).
@@ -28,6 +29,8 @@ from reportlab.platypus.tableofcontents import TableOfContents
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "docs" / "DOCUMENTATION.md"
 OUT = ROOT / "docs" / "Lumen_Documentation.pdf"
+HEADER = "Lumen: complete documentation"       # running header
+COVER_SUB = "Complete documentation, A to Z"    # cover subtitle
 FONT_DIR = Path(r"C:\Windows\Fonts")
 
 # ---------------------------------------------------------------- fonts and colours
@@ -373,7 +376,7 @@ def parse(md: str):
 class Doc(BaseDocTemplate):
     def __init__(self, path, **kw):
         super().__init__(path, pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN, topMargin=2.2 * cm, bottomMargin=2 * cm,
-                         title="Lumen: complete documentation (A to Z)", author="Lumen", subject="Architecture, usage and operations",
+                         title=f"Lumen: {HEADER}", author="Lumen", subject=COVER_SUB,
                          **kw)
         frame = Frame(MARGIN, self.bottomMargin, CONTENT_W, PAGE_H - self.topMargin - self.bottomMargin, id="f", leftPadding=0,
                       rightPadding=0, topPadding=0, bottomPadding=0)
@@ -399,7 +402,7 @@ class Doc(BaseDocTemplate):
         c.line(MARGIN, 1.5 * cm, PAGE_W - MARGIN, 1.5 * cm)
         c.setFont("Seg", 8)
         c.setFillColor(MUTED)
-        c.drawString(MARGIN, PAGE_H - 1.35 * cm, "Lumen: complete documentation")
+        c.drawString(MARGIN, PAGE_H - 1.35 * cm, f"Lumen: {HEADER}")
         c.drawRightString(PAGE_W - MARGIN, 1.0 * cm, f"Page {doc.page}")
         c.drawString(MARGIN, 1.0 * cm, "github.com/salman-kv/lumen")
         c.restoreState()
@@ -415,9 +418,15 @@ class Doc(BaseDocTemplate):
 
 
 def main():
+    global SRC, OUT, HEADER, COVER_SUB
+    args = sys.argv[1:]
+    if args:
+        SRC, OUT = Path(args[0]).resolve(), Path(args[1]).resolve()
+        HEADER = args[2] if len(args) > 2 else SRC.stem.replace("_", " ").lower()
+        COVER_SUB = args[3] if len(args) > 3 else HEADER
     cover, body = parse(SRC.read_text(encoding="utf-8"))
     story = [Spacer(1, 3.2 * cm), Paragraph("Lumen", S["cover_title"]), Spacer(1, 6),
-             Paragraph("Complete documentation, A to Z", S["cover_sub"]), Spacer(1, 9.4 * cm),
+             Paragraph(COVER_SUB, S["cover_sub"]), Spacer(1, 9.4 * cm),
              Paragraph(inline(cover["intro"]), S["cover_text"]), Spacer(1, 6),
              Paragraph(f"<b>Repository:</b> github.com/salman-kv/lumen<br/><b>Version of this document:</b> {date.today():%d %B %Y}",
                        S["cover_text"]), PageBreak()]
