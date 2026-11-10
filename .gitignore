@@ -17,3 +17,4 @@ frontend/dist/
 server.log
 .tokens.json
 tools/
+video_out/
