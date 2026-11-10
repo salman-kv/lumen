@@ -85,6 +85,7 @@ def esc(t: str) -> str:
 
 
 def inline(text: str) -> str:
+    text = re.sub(r"\*\*(`[^`]+`)\*\*", r"\1", text)  # bold around a code span: keep the code span
     out = []
     for i, piece in enumerate(re.split(r"(`[^`]+`)", text)):
         if i % 2 == 1:  # code span
